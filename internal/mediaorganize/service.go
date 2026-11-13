@@ -17,6 +17,7 @@ import (
 	"litepan/internal/driver"
 	"litepan/internal/file"
 	"litepan/internal/mediaorganize/classification"
+	"litepan/internal/mediaorganize/planner"
 	"litepan/internal/mediaorganize/rules"
 	"litepan/internal/mediaorganize/tmdb"
 	"litepan/internal/settings"
@@ -41,6 +42,7 @@ type Service struct {
 	planner        PlannerBuilder
 	executor       ExecutorApplier
 	classification classification.RootDirectoryProvider
+	prober         planner.MediaProber
 
 	mu              sync.Mutex
 	taskLogs        map[string][]LogEntry
@@ -61,6 +63,7 @@ type ServiceOptions struct {
 	Planner        PlannerBuilder
 	Executor       ExecutorApplier
 	Classification classification.RootDirectoryProvider
+	Prober         planner.MediaProber
 }
 
 func NewService(opts ServiceOptions) *Service {
@@ -85,6 +88,7 @@ func NewService(opts ServiceOptions) *Service {
 		planner:         p,
 		executor:        e,
 		classification:  opts.Classification,
+		prober:          opts.Prober,
 		taskLogs:        make(map[string][]LogEntry),
 		taskProgress:    make(map[string]map[string]any),
 		running:         make(map[string]struct{}),

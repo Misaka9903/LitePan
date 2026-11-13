@@ -4,7 +4,13 @@ import (
 	"context"
 
 	"litepan/internal/domain"
+	"litepan/internal/mediaprobe"
 )
+
+// MediaProber 用真实文件头补全媒体标签，实现见 internal/mediaprobe。
+type MediaProber interface {
+	ProbeBucketed(ctx context.Context, req mediaprobe.Request) (map[string]string, bool)
+}
 
 type FileService interface {
 	List(ctx context.Context, accountID int64, parentID string, forceRefresh bool) ([]domain.FileItem, error)

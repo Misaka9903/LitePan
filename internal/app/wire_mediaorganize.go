@@ -13,6 +13,8 @@ import (
 	"litepan/internal/mediaorganize/executor"
 	"litepan/internal/mediaorganize/planner"
 	"litepan/internal/mediaorganize/tmdb"
+	"litepan/internal/mediaprobe"
+	"litepan/internal/playback"
 	"litepan/internal/settings"
 )
 
@@ -23,7 +25,19 @@ func wireMediaOrganize(
 	dataDir string,
 	ai *aiorganize.Service,
 	classifier *classifyorganize.Service,
+	playbackSvc *playback.Service,
 ) *mediaorganize.Service {
+	// 探测服务不可用时静默降级：标签仍按文件名生成，整理流程不受影响。
+	var prober planner.MediaProber
+	if probeSvc, err := mediaprobe.New(mediaprobe.Options{
+		DataDir:  dataDir,
+		Playback: playbackSvc,
+		Log:      logs.For(logx.ModuleSystem),
+	}); err != nil {
+		logs.For(logx.ModuleSystem).Info("媒体信息探测未启用", "error", err)
+	} else {
+		prober = probeSvc
+	}
 	return mediaorganize.NewService(mediaorganize.ServiceOptions{
 		Repo:           st.store.MediaOrganizeTasks,
 		Files:          files,
@@ -31,11 +45,13 @@ func wireMediaOrganize(
 		DataDir:        dataDir,
 		Log:            logs.For(logx.ModuleFileOp),
 		Classification: classifier,
+		Prober:         prober,
 		Planner: plannerAdapter{
 			files:          files,
 			settings:       st.settings,
 			recognition:    ai,
 			classification: classifier,
+			prober:         prober,
 		},
 		Executor: executorAdapter{files: files},
 	})
@@ -46,6 +62,7 @@ type plannerAdapter struct {
 	settings       *settings.Service
 	recognition    *aiorganize.Service
 	classification *classifyorganize.Service
+	prober         planner.MediaProber
 }
 
 func (a plannerAdapter) Build(
@@ -121,6 +138,7 @@ func (a plannerAdapter) Build(
 	)
 	p.SetRecognitionEnhancer(a.recognition)
 	p.SetClassificationEnhancer(a.classification)
+	p.SetMediaProber(a.prober)
 	return p.Build()
 }
 

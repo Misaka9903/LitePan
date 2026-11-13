@@ -102,6 +102,7 @@ func (s *Service) replanMatchedGroup(
 		nil,
 		func() error { return nil },
 	)
+	p.SetMediaProber(s.prober)
 	s.configureManualMatchPlanner(p)
 	return p.ReplanMatchedGroup(group, raw)
 }

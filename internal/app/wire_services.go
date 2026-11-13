@@ -79,7 +79,7 @@ func wireServices(cfg config.Config, logs *logx.Manager, st *storeBundle, core *
 	retentionSvc, retentionCoord := wireCacheRetention(st, fileSvc, core.cache, core.bus, logs)
 	aiOrganizeSvc := aiorganize.New(st.settings)
 	classifyOrganizeSvc := classifyorganize.New(st.settings)
-	mediaOrganizeSvc := wireMediaOrganize(st, fileSvc, logs, cfg.DataDir, aiOrganizeSvc, classifyOrganizeSvc)
+	mediaOrganizeSvc := wireMediaOrganize(st, fileSvc, logs, cfg.DataDir, aiOrganizeSvc, classifyOrganizeSvc, playbackSvc)
 	strmScrapeSvc := strmscrape.New(strmscrape.Options{
 		Strm:     strmSvc,
 		Settings: st.settings,

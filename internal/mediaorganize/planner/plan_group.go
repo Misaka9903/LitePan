@@ -316,6 +316,7 @@ func (p *Planner) planGroupWithMatch(
 				parsedForTag = rules.MergeAlignedMediaTags(parsedForTag, bucketDefaults)
 			}
 		}
+		parsedForTag = p.applyMediaProbe(parsedForTag, key, entry, currentSeason)
 		mediaInfoTag := rules.BuildMediaInfoTags(parsedForTag, p.mediaTagOrder)
 
 		fileInfo := rules.ParsedMedia{

@@ -105,6 +105,35 @@ func enrichParsedMediaTags(name string, p ParsedMedia) ParsedMedia {
 	return parsedFromMap(m)
 }
 
+// mediaTagProbeKeys 是「探测真实文件头」可以提供的标签键。
+var mediaTagProbeKeys = map[string]struct{}{
+	"screen_size": {}, "frame_rate": {}, "video_codec": {}, "audio_codec": {}, "audio_channels": {},
+}
+
+// MergeProbedTags 把探测到的标签合并进文件名解析结果。
+// mode 为 "fill" 时只补文件名里缺失的字段；"prefer"/"force" 以探测值为准，
+// 探测不到的字段保留原值（来源、版本这类信息不在容器元数据里）。
+func MergeProbedTags(p ParsedMedia, probed map[string]string, mode string) ParsedMedia {
+	if len(probed) == 0 {
+		return p
+	}
+	m := p.ToMap()
+	for key, value := range probed {
+		if _, ok := mediaTagProbeKeys[key]; !ok {
+			continue
+		}
+		v := strings.TrimSpace(value)
+		if v == "" {
+			continue
+		}
+		if mode == "fill" && !mediaTagEmpty(m, key) {
+			continue
+		}
+		m[key] = v
+	}
+	return parsedFromMap(m)
+}
+
 func mediaTagEmpty(m map[string]any, key string) bool {
 	if m == nil {
 		return true

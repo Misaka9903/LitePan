@@ -48,6 +48,8 @@ type Planner struct {
 	metaExts          map[string]struct{}
 	mediaTagOrder     []string
 	alignMediaTags    bool
+	prober            MediaProber
+	probeMode         string
 	actionType        string
 	marker            string
 	taskMediaType     string
@@ -65,6 +67,11 @@ type Planner struct {
 	classification    classification.Enhancer
 	deferred          []deferredGroup
 	applyingAI        bool
+}
+
+// SetMediaProber 注入媒体信息探测实现；未注入或未开启时标签仍只来自文件名。
+func (p *Planner) SetMediaProber(prober MediaProber) {
+	p.prober = prober
 }
 
 func (p *Planner) SetRecognitionEnhancer(enhancer recognition.Enhancer) {
@@ -137,6 +144,14 @@ func (p *Planner) loadSettings() {
 		p.mediaTagOrder = rules.DefaultMediaTagOrder
 	}
 	p.alignMediaTags = rules.SettingBool(p.settings["mo_align_media_tags"], false)
+
+	// 探测默认关闭：读文件头会给网盘带来额外请求，不能让升级后的整理任务凭空变慢。
+	p.probeMode = strings.ToLower(strings.TrimSpace(strSetting(p.settings, "mo_probe_mode", "prefer")))
+	if !rules.SettingBool(p.settings["mo_probe_enabled"], false) {
+		p.probeMode = "off"
+	} else if p.probeMode != "fill" && p.probeMode != "prefer" && p.probeMode != "force" {
+		p.probeMode = "prefer"
+	}
 
 	p.actionType = strings.ToLower(strings.TrimSpace(p.cfg.ActionType))
 	if p.actionType == "" {
