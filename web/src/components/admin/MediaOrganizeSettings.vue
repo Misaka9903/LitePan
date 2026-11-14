@@ -522,6 +522,7 @@ defineExpose(
               <SettingsHelpTooltip title="探测真实媒体信息说明">
                 <p>读取文件头补全分辨率、编码、声道与帧率，文件名不再是唯一来源。</p>
                 <p>只读文件头（上限 8MB），不下载整片；同一季或同一影片只探测一次。关闭时完全按文件名生成。</p>
+                <p>「只补空缺」模式下，文件名标签齐全的文件会被直接跳过，完全不读文件。</p>
               </SettingsHelpTooltip>
             </div>
           </template>
@@ -535,7 +536,7 @@ defineExpose(
             <div class="settings-row__label">
               <span>探测结果与文件名冲突时</span>
               <SettingsHelpTooltip title="探测结果与文件名冲突时说明">
-                <p>只补空缺：文件名已有的标签不覆盖。</p>
+                <p>只补空缺：文件名已有的标签不覆盖；标签已齐全时不会探测，不产生任何读取。</p>
                 <p>探测优先：以文件头为准，探测不到的字段保留文件名结果。</p>
                 <p>全部以探测为准：WEB-DL、BluRay 这类来源信息不在文件头里，会被丢掉。</p>
               </SettingsHelpTooltip>
