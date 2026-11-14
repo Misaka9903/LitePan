@@ -11,11 +11,10 @@ import (
 func newCacheTestService(t *testing.T) *Service {
 	t.Helper()
 	return &Service{
-		opts:     Options{DataDir: t.TempDir()},
-		log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
-		tokens:   map[string]*sourceToken{},
-		cache:    map[string]cacheEntry{},
-		lastSave: time.Now(),
+		opts:   Options{DataDir: t.TempDir()},
+		log:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		tokens: map[string]*sourceToken{},
+		cache:  map[string]cacheEntry{},
 	}
 }
 
@@ -98,19 +97,5 @@ func TestCacheEvictsOldestBeyondLimit(t *testing.T) {
 	}
 	if _, exists := s.cache[fmt.Sprintf("k%05d", cacheMaxItems+4)]; !exists {
 		t.Fatal("最新的条目不应被淘汰")
-	}
-}
-
-func TestPruneDropsExpiredOnLoad(t *testing.T) {
-	s := newCacheTestService(t)
-	s.cache["old"] = cacheEntry{OK: true, Tags: sampleTags(), At: time.Now().Add(-cacheTTL - time.Hour).Unix()}
-	s.cache["fresh"] = cacheEntry{OK: true, Tags: sampleTags(), At: time.Now().Unix()}
-	s.pruneLocked()
-
-	if _, exists := s.cache["old"]; exists {
-		t.Fatal("启动加载时应清掉过期条目")
-	}
-	if _, exists := s.cache["fresh"]; !exists {
-		t.Fatal("启动加载时不应删除有效条目")
 	}
 }

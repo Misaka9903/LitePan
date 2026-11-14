@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -35,9 +34,7 @@ const (
 	// outputLimit 限制保留的 ffmpeg stderr 字节数。
 	outputLimit = 256 << 10
 
-	cacheFileName = "media_probe_cache.json"
-	saveInterval  = 5 * time.Second
-	// cacheTTL 是探测结果的有效期：片源可能被替换，过期后重新读一次文件头。
+	// cacheTTL 是探测结果在进程内的有效期：片源可能被替换，过期后重新读一次文件头。
 	cacheTTL = 30 * 24 * time.Hour
 	// cacheMaxItems 限制缓存条数（单条约 200 字节），超出按最近一次探测时间淘汰。
 	cacheMaxItems = 5000
@@ -67,10 +64,6 @@ type cacheEntry struct {
 	Size   int64  `json:"size,omitempty"`
 }
 
-type cacheFile struct {
-	Entries map[string]cacheEntry `json:"entries"`
-}
-
 // Service 读取网盘文件头补全媒体标签，并按桶缓存结果。
 type Service struct {
 	opts   Options
@@ -80,10 +73,10 @@ type Service struct {
 	server *http.Server
 	sem    chan struct{}
 
-	mu       sync.Mutex
-	tokens   map[string]*sourceToken
-	cache    map[string]cacheEntry
-	lastSave time.Time
+	mu     sync.Mutex
+	tokens map[string]*sourceToken
+	// cache 只在进程内有效：重启后重新探测，天然不存在陈旧数据。
+	cache map[string]cacheEntry
 }
 
 // New 创建探测服务。找不到 ffmpeg 时服务仍可用，只是每次探测都返回「不可用」。
@@ -105,7 +98,6 @@ func New(opts Options) (*Service, error) {
 		tokens: make(map[string]*sourceToken),
 		cache:  make(map[string]cacheEntry),
 	}
-	s.loadCache()
 	if binary, err := findFFmpeg(opts.DataDir); err == nil {
 		s.binary = binary
 	} else {
@@ -149,15 +141,11 @@ func (s *Service) startServer() error {
 	return nil
 }
 
-// Close 停止取流入口并落盘缓存。
+// Close 停止取流入口。探测缓存只在进程内，无需落盘或清理。
 func (s *Service) Close() error {
 	if s == nil {
 		return nil
 	}
-	s.mu.Lock()
-	snapshot := s.snapshotLocked()
-	s.mu.Unlock()
-	s.writeSnapshot(snapshot)
 	if s.server != nil {
 		return s.server.Close()
 	}
@@ -242,35 +230,7 @@ func (s *Service) store(key string, req Request, tags map[string]string) {
 		Size:   req.Size,
 	}
 	s.evictLocked()
-	save := time.Since(s.lastSave) > saveInterval
-	var snapshot map[string]cacheEntry
-	if save {
-		s.lastSave = time.Now()
-		snapshot = s.snapshotLocked()
-	}
 	s.mu.Unlock()
-	if save {
-		s.writeSnapshot(snapshot)
-	}
-}
-
-func (s *Service) snapshotLocked() map[string]cacheEntry {
-	out := make(map[string]cacheEntry, len(s.cache))
-	for key, entry := range s.cache {
-		out[key] = entry
-	}
-	return out
-}
-
-// pruneLocked 清掉过期条目并压到上限以内，启动加载时调用。
-func (s *Service) pruneLocked() {
-	now := time.Now()
-	for key, entry := range s.cache {
-		if entry.At > 0 && now.Sub(time.Unix(entry.At, 0)) > cacheTTL {
-			delete(s.cache, key)
-		}
-	}
-	s.evictLocked()
 }
 
 // evictLocked 超出上限时按探测时间从旧到新淘汰。
@@ -290,43 +250,6 @@ func (s *Service) evictLocked() {
 	sort.Slice(items, func(i, j int) bool { return items[i].at < items[j].at })
 	for i := 0; i < excess && i < len(items); i++ {
 		delete(s.cache, items[i].key)
-	}
-}
-
-func (s *Service) cachePath() string { return filepath.Join(s.opts.DataDir, cacheFileName) }
-
-func (s *Service) loadCache() {
-	data, err := os.ReadFile(s.cachePath())
-	if err != nil {
-		return
-	}
-	var file cacheFile
-	if err := json.Unmarshal(data, &file); err != nil {
-		s.log.Debug("媒体信息探测缓存损坏，已忽略", "error", err)
-		return
-	}
-	if len(file.Entries) > 0 {
-		s.cache = file.Entries
-		s.pruneLocked()
-	}
-}
-
-func (s *Service) writeSnapshot(snapshot map[string]cacheEntry) {
-	if len(snapshot) == 0 {
-		return
-	}
-	data, err := json.Marshal(cacheFile{Entries: snapshot})
-	if err != nil {
-		return
-	}
-	path := s.cachePath()
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		s.log.Debug("媒体信息探测缓存写入失败", "error", err)
-		return
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		s.log.Debug("媒体信息探测缓存替换失败", "error", err)
 	}
 }
 
