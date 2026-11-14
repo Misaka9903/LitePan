@@ -6,8 +6,10 @@ services:
     image: litepan:probe
     container_name: litepan
     restart: unless-stopped
-    ports:
-      - "5211:5211"
+    # 必须用 host 网络：容器与 WSL 共享网络命名空间后，容器内的 127.0.0.1
+    # 才指向宿主（TMDB 走宿主代理时依赖这一点）。bridge 网络下 127.0.0.1 是容器自己。
+    # 代价：不再用 ports 映射，5211 直接监听在宿主上。
+    network_mode: host
     environment:
       - TZ=Asia/Shanghai
     # 与镜像里的 USER 一致，保证数据卷文件属主是宿主用户

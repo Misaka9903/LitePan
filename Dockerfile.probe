@@ -14,7 +14,9 @@ RUN set -eux; \
 
 WORKDIR /app
 # mounts 需要可写（FUSE 挂载点），非 root 用户也要能创建子目录
-RUN mkdir -p /app/data /app/strm /app/mounts && chmod 777 /app/mounts
+# 非 root 运行，所以这三个目录必须归 1000 所有（不挂卷时也要能写）
+RUN mkdir -p /app/data /app/strm /app/mounts \
+    && chown -R 1000:1000 /app/data /app/strm /app/mounts
 
 COPY litepan /app/litepan
 # 静态 ffmpeg（7.0.2，单文件 77MB），放在不会被数据卷遮蔽的位置
