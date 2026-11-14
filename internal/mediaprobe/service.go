@@ -22,9 +22,12 @@ import (
 )
 
 const (
-	// probeMaxRead 是单次探测允许从网盘读取的字节上限。
-	// ffmpeg 只看容器头，正常 1-3MB 即够；超限直接中断，避免异常驱动整片下载。
-	probeMaxRead = 8 << 20
+	// probeMaxRead 是单次探测允许从网盘读取的上限，不是每次都会读这么多：
+	// ffmpeg 解析完容器头就退出，普通文件 1-3MB 即结束。
+	// 上限只是安全闸——既防异常驱动整片拉流，也要够容纳「多字幕轨 + 内嵌字体」的头部
+	// （实测某番 MKV 已用到 7.9MB）。大文件（几十 GB 的 remux）头部并不会等比变大，
+	// 留 64MB 的余量足够，正常片源不会因此多读。
+	probeMaxRead = 64 << 20
 	// probeTimeout 单次探测超时；限速严重时宁可跳过也不要拖住整理任务。
 	probeTimeout = 20 * time.Second
 	// probeWindow 是 ffmpeg 的头部探测窗口，与 probeMaxRead 一起控制读取量。
