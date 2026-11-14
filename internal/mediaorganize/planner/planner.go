@@ -44,12 +44,14 @@ type Planner struct {
 	plannedWorkCount  int
 	quotaReached      bool
 
-	mediaExts         map[string]struct{}
-	metaExts          map[string]struct{}
-	mediaTagOrder     []string
-	alignMediaTags    bool
-	prober            MediaProber
-	probeMode         string
+	mediaExts      map[string]struct{}
+	metaExts       map[string]struct{}
+	mediaTagOrder  []string
+	alignMediaTags bool
+	prober         MediaProber
+	probeMode      string
+	// probeSeen 记录本次计划里已写过日志的探测桶，避免整季刷屏。
+	probeSeen         map[string]struct{}
 	actionType        string
 	marker            string
 	taskMediaType     string

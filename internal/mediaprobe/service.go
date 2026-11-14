@@ -269,6 +269,16 @@ func (s *Service) newSource(accountID int64, fileID string, size int64) (string,
 	return token, "http://" + s.addr + "/source/" + token, nil
 }
 
+// sourceRead 返回某个临时入口已读取的字节数。
+func (s *Service) sourceRead(token string) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if t := s.tokens[token]; t != nil {
+		return t.read
+	}
+	return 0
+}
+
 func (s *Service) dropToken(token string) {
 	s.mu.Lock()
 	delete(s.tokens, token)
@@ -359,6 +369,7 @@ func (s *Service) probe(ctx context.Context, accountID int64, fileID string, siz
 		return Info{}, err
 	}
 	defer s.dropToken(token)
+	started := time.Now()
 
 	runCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
@@ -375,9 +386,12 @@ func (s *Service) probe(ctx context.Context, accountID int64, fileID string, siz
 	// 只看 stderr 内容，退出码无意义（缺输出参数时 ffmpeg 必定非零退出）。
 	_ = cmd.Run()
 
+	read := s.sourceRead(token)
 	info := ParseOutput(stderr.String())
 	if info.Empty() {
+		s.log.Info("媒体信息探测未取到信息", "file_id", fileID, "read_bytes", read, "elapsed", time.Since(started).String())
 		return Info{}, errors.New("ffmpeg 未返回可用媒体信息")
 	}
+	s.log.Info("媒体信息探测完成", "file_id", fileID, "read_bytes", read, "elapsed", time.Since(started).String())
 	return info, nil
 }

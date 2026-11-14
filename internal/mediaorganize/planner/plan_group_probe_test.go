@@ -2,6 +2,7 @@ package planner
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"litepan/internal/domain"
@@ -119,5 +120,47 @@ func TestApplyMediaProbeDisabled(t *testing.T) {
 	}
 	if prober.calls != 0 {
 		t.Fatalf("关闭时不应探测，实际调用 %d 次", prober.calls)
+	}
+}
+
+func TestJoinProbedTagsFollowsOrder(t *testing.T) {
+	tags := map[string]string{
+		"screen_size": "1080p", "video_codec": "H.264",
+		"audio_codec": "FLAC", "audio_channels": "2.0",
+	}
+	order := []string{"audio_codec", "screen_size", "video_codec", "audio_channels"}
+	if got := joinProbedTags(tags, order); got != "FLAC 1080p H.264 2.0" {
+		t.Fatalf("应按配置顺序拼接，得到 %q", got)
+	}
+	if got := joinProbedTags(map[string]string{}, order); got != "(空)" {
+		t.Fatalf("无标签时应返回占位，得到 %q", got)
+	}
+	// 顺序里没有的标签不出现
+	tags["frame_rate"] = "23.976"
+	if got := joinProbedTags(tags, order); strings.Contains(got, "23.976") {
+		t.Fatalf("未配置的标签不应出现，得到 %q", got)
+	}
+}
+
+func TestProbeLogOnlyOncePerBucket(t *testing.T) {
+	var lines []string
+	prober := &countingProber{tags: map[string]string{"screen_size": "2160p"}}
+	p := &Planner{
+		prober: prober, probeMode: "fill", mediaTagOrder: fullTagOrder(),
+		log: func(msg string) { lines = append(lines, msg) },
+	}
+	incomplete := completeParsed()
+	incomplete.ScreenSize = ""
+
+	p.applyMediaProbe(incomplete, groupKey{mediaKind: "tv"}, probeEntry(), nil)
+	p.applyMediaProbe(incomplete, groupKey{mediaKind: "tv"}, probeEntry(), nil)
+
+	// 缓存命中由 mediaprobe.Service 负责，这里的假探测器不自带缓存；
+	// 本用例验证的是「同一个桶只记一条日志」。
+	if len(lines) != 1 {
+		t.Fatalf("同桶只应记一条日志，实际 %d 条: %v", len(lines), lines)
+	}
+	if !strings.Contains(lines[0], "2160p") || !strings.Contains(lines[0], "S01E01") {
+		t.Fatalf("日志应包含探测结果与文件名，得到 %q", lines[0])
 	}
 }
