@@ -1,0 +1,36 @@
+FROM debian:bookworm-slim
+
+# 国内 apt 源，避免 deb.debian.org 超时
+RUN set -eux; \
+    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources; \
+    fi; \
+    if [ -f /etc/apt/sources.list ]; then \
+        sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list; \
+    fi; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates tzdata fuse3; \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+# mounts 需要可写（FUSE 挂载点），非 root 用户也要能创建子目录
+RUN mkdir -p /app/data /app/strm /app/mounts && chmod 777 /app/mounts
+
+COPY litepan /app/litepan
+# 静态 ffmpeg（7.0.2，单文件 77MB），放在不会被数据卷遮蔽的位置
+COPY ffmpeg /opt/ffmpeg/ffmpeg
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh /opt/ffmpeg/ffmpeg
+
+ENV LITEPAN_DATA_DIR=/app/data \
+    LITEPAN_STRM_DIR=/app/strm \
+    LITEPAN_LISTEN=:5211 \
+    LITEPAN_LOG_LEVEL=info \
+    TZ=Asia/Shanghai
+
+EXPOSE 5211
+
+# 以非 root 运行，保证数据卷里的文件属主是宿主用户而不是 root
+USER 1000:1000
+
+ENTRYPOINT ["/entrypoint.sh"]
