@@ -56,6 +56,8 @@ type sourceToken struct {
 	expires   time.Time
 	maxRead   int64
 	read      int64
+	// capped 表示读取曾撞到上限，ffmpeg 的输出可能因此残缺。
+	capped bool
 }
 
 type cacheEntry struct {
@@ -272,14 +274,30 @@ func (s *Service) newSource(accountID int64, fileID string, size int64) (string,
 	return token, "http://" + s.addr + "/source/" + token, nil
 }
 
-// sourceRead 返回某个临时入口已读取的字节数。
-func (s *Service) sourceRead(token string) int64 {
+// countRead 累加读取字节并判断是否越过上限；越界时打标，供调用方判断结果是否可信。
+func (s *Service) countRead(token string, n int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur := s.tokens[token]
+	if cur == nil {
+		return false
+	}
+	cur.read += n
+	if cur.read > cur.maxRead {
+		cur.capped = true
+		return false
+	}
+	return true
+}
+
+// sourceStats 返回某个临时入口已读取的字节数以及是否撞过上限。
+func (s *Service) sourceStats(token string) (int64, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if t := s.tokens[token]; t != nil {
-		return t.read
+		return t.read, t.capped
 	}
-	return 0
+	return 0, false
 }
 
 func (s *Service) dropToken(token string) {
@@ -302,14 +320,7 @@ func (s *Service) serveSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cw := &cappedWriter{ResponseWriter: w, add: func(n int64) bool {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		cur := s.tokens[token]
-		if cur == nil {
-			return false
-		}
-		cur.read += n
-		return cur.read <= cur.maxRead
+		return s.countRead(token, n)
 	}}
 	err := s.opts.Playback.ServeHTTP(cw, r, playback.Request{AccountID: current.accountID, FileID: current.fileID}, playback.Intent{
 		FileName:       "probe",
@@ -389,12 +400,17 @@ func (s *Service) probe(ctx context.Context, accountID int64, fileID string, siz
 	// 只看 stderr 内容，退出码无意义（缺输出参数时 ffmpeg 必定非零退出）。
 	_ = cmd.Run()
 
-	read := s.sourceRead(token)
+	read, capped := s.sourceStats(token)
 	info := ParseOutput(stderr.String())
 	if info.Empty() {
 		s.log.Info("媒体信息探测未取到信息", "file_id", fileID, "read_bytes", read, "elapsed", time.Since(started).String())
 		return Info{}, errors.New("ffmpeg 未返回可用媒体信息")
 	}
 	s.log.Info("媒体信息探测完成", "file_id", fileID, "read_bytes", read, "elapsed", time.Since(started).String())
+	if capped {
+		// 撞上限说明 ffmpeg 是被硬切断的，流信息可能只解析到一半。
+		s.log.Warn("探测读取达到上限被中断，结果可能不完整",
+			"file_id", fileID, "read_bytes", read, "limit_bytes", int64(probeMaxRead))
+	}
 	return info, nil
 }
