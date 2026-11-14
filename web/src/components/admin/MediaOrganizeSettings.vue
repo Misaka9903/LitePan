@@ -35,6 +35,12 @@ const tmdbLanguageOptions = [
   { value: "en-US", label: "English" },
 ];
 
+const probeModeOptions = [
+  { value: "prefer", label: "探测优先（推荐）" },
+  { value: "fill", label: "只补空缺" },
+  { value: "force", label: "全部以探测为准" },
+];
+
 const conflictPolicyOptions = [
   { value: "skip", label: "跳过（推荐）" },
   { value: "overwrite", label: "覆盖" },
@@ -94,6 +100,8 @@ const {
   metadata_extensions: "",
   media_tag_order: "",
   align_media_tags: false,
+  probe_enabled: false,
+  probe_mode: "prefer",
   max_works_per_run: 50,
   overwrite_existing: false,
 });
@@ -507,6 +515,37 @@ defineExpose(
       </SettingsCard>
 
       <SettingsCard title="媒体信息标签排序" :accent="ORGANIZE_SETTINGS_ACCENT">
+        <SettingsRow :show-changed-badge="true" :changed="isFieldChanged('probe_enabled')">
+          <template #info>
+            <div class="settings-row__label">
+              <span>探测真实媒体信息</span>
+              <SettingsHelpTooltip title="探测真实媒体信息说明">
+                <p>读取文件头补全分辨率、编码、声道与帧率，文件名不再是唯一来源。</p>
+                <p>只读文件头（上限 8MB），不下载整片；同一季或同一影片只探测一次。关闭时完全按文件名生成。</p>
+              </SettingsHelpTooltip>
+            </div>
+          </template>
+          <template #control>
+            <SettingsBoolSegment v-model="settings.probe_enabled" label="探测真实媒体信息" />
+          </template>
+        </SettingsRow>
+
+        <SettingsRow :show-changed-badge="true" :changed="isFieldChanged('probe_mode')">
+          <template #info>
+            <div class="settings-row__label">
+              <span>探测结果与文件名冲突时</span>
+              <SettingsHelpTooltip title="探测结果与文件名冲突时说明">
+                <p>只补空缺：文件名已有的标签不覆盖。</p>
+                <p>探测优先：以文件头为准，探测不到的字段保留文件名结果。</p>
+                <p>全部以探测为准：WEB-DL、BluRay 这类来源信息不在文件头里，会被丢掉。</p>
+              </SettingsHelpTooltip>
+            </div>
+          </template>
+          <template #control>
+            <AppSelect v-model="settings.probe_mode" :options="probeModeOptions" />
+          </template>
+        </SettingsRow>
+
         <SettingsRow :show-changed-badge="true" :changed="isFieldChanged('align_media_tags')">
           <template #info>
             <div class="settings-row__label">

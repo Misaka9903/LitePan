@@ -142,7 +142,7 @@ func parseMediaTagOrder(raw any) (json.RawMessage, error) {
 
 func anyToSettingString(field string, raw any) (string, error) {
 	switch field {
-	case "proxy_enabled", "align_media_tags", "overwrite_existing":
+	case "proxy_enabled", "align_media_tags", "overwrite_existing", "probe_enabled":
 		b, ok := raw.(bool)
 		if !ok {
 			return "", fmt.Errorf("%s 需为布尔值", field)

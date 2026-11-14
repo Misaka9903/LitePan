@@ -108,6 +108,8 @@ export interface MediaOrganizeSettings {
   metadata_extensions: string;
   media_tag_order: string[] | string;
   align_media_tags: boolean;
+  probe_enabled: boolean;
+  probe_mode: string;
   max_works_per_run: number;
   overwrite_existing: boolean;
 }
