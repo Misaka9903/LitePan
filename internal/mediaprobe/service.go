@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +37,10 @@ const (
 
 	cacheFileName = "media_probe_cache.json"
 	saveInterval  = 5 * time.Second
+	// cacheTTL 是探测结果的有效期：片源可能被替换，过期后重新读一次文件头。
+	cacheTTL = 30 * 24 * time.Hour
+	// cacheMaxItems 限制缓存条数（单条约 200 字节），超出按最近一次探测时间淘汰。
+	cacheMaxItems = 5000
 )
 
 // Options 是探测服务的依赖。
@@ -57,6 +62,9 @@ type cacheEntry struct {
 	OK   bool              `json:"ok"`
 	Tags map[string]string `json:"tags,omitempty"`
 	At   int64             `json:"at"`
+	// 抽样文件指纹：同一个文件被替换后 size 会变，据此判断是否需要重探。
+	FileID string `json:"file_id,omitempty"`
+	Size   int64  `json:"size,omitempty"`
 }
 
 type cacheFile struct {
@@ -169,7 +177,7 @@ func (s *Service) ProbeBucketed(ctx context.Context, req Request) (map[string]st
 		ctx = context.Background()
 	}
 	key := BucketKey(req)
-	if tags, done := s.cached(key); done {
+	if tags, done := s.cached(key, req); done {
 		return tags, len(tags) > 0
 	}
 
@@ -181,31 +189,41 @@ func (s *Service) ProbeBucketed(ctx context.Context, req Request) (map[string]st
 	defer func() { <-s.sem }()
 
 	// 并发下同一桶可能排队两次，进入临界区后再查一次。
-	if tags, done := s.cached(key); done {
+	if tags, done := s.cached(key, req); done {
 		return tags, len(tags) > 0
 	}
 
 	info, err := s.probe(ctx, req.AccountID, req.FileID, req.Size)
 	if err != nil {
 		s.log.Debug("媒体信息探测失败，回退文件名标签", "file", req.FileName, "error", err)
-		s.store(key, nil)
+		s.store(key, req, nil)
 		return nil, false
 	}
 	tags := info.Tags()
 	if len(tags) == 0 {
-		s.store(key, nil)
+		s.store(key, req, nil)
 		return nil, false
 	}
-	s.store(key, tags)
+	s.store(key, req, tags)
 	return tags, true
 }
 
 // cached 返回缓存结果。done=true 表示该桶已探测过（成功或失败），不必再试。
-func (s *Service) cached(key string) (map[string]string, bool) {
+func (s *Service) cached(key string, req Request) (map[string]string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry, ok := s.cache[key]
 	if !ok {
+		return nil, false
+	}
+	if entry.At > 0 && time.Since(time.Unix(entry.At, 0)) > cacheTTL {
+		delete(s.cache, key)
+		return nil, false
+	}
+	// 抽样过的那个文件被换源/重下：size 变了，旧标签不再可信。
+	// 桶内其它文件 size 本来就不同，只在同一个 fileID 上比较。
+	if entry.FileID != "" && entry.FileID == req.FileID && entry.Size > 0 && req.Size > 0 && entry.Size != req.Size {
+		delete(s.cache, key)
 		return nil, false
 	}
 	if !entry.OK || len(entry.Tags) == 0 {
@@ -214,9 +232,16 @@ func (s *Service) cached(key string) (map[string]string, bool) {
 	return entry.Tags, true
 }
 
-func (s *Service) store(key string, tags map[string]string) {
+func (s *Service) store(key string, req Request, tags map[string]string) {
 	s.mu.Lock()
-	s.cache[key] = cacheEntry{OK: tags != nil, Tags: tags, At: time.Now().Unix()}
+	s.cache[key] = cacheEntry{
+		OK:     tags != nil,
+		Tags:   tags,
+		At:     time.Now().Unix(),
+		FileID: req.FileID,
+		Size:   req.Size,
+	}
+	s.evictLocked()
 	save := time.Since(s.lastSave) > saveInterval
 	var snapshot map[string]cacheEntry
 	if save {
@@ -237,6 +262,37 @@ func (s *Service) snapshotLocked() map[string]cacheEntry {
 	return out
 }
 
+// pruneLocked 清掉过期条目并压到上限以内，启动加载时调用。
+func (s *Service) pruneLocked() {
+	now := time.Now()
+	for key, entry := range s.cache {
+		if entry.At > 0 && now.Sub(time.Unix(entry.At, 0)) > cacheTTL {
+			delete(s.cache, key)
+		}
+	}
+	s.evictLocked()
+}
+
+// evictLocked 超出上限时按探测时间从旧到新淘汰。
+func (s *Service) evictLocked() {
+	excess := len(s.cache) - cacheMaxItems
+	if excess <= 0 {
+		return
+	}
+	type cacheItem struct {
+		key string
+		at  int64
+	}
+	items := make([]cacheItem, 0, len(s.cache))
+	for key, entry := range s.cache {
+		items = append(items, cacheItem{key: key, at: entry.At})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].at < items[j].at })
+	for i := 0; i < excess && i < len(items); i++ {
+		delete(s.cache, items[i].key)
+	}
+}
+
 func (s *Service) cachePath() string { return filepath.Join(s.opts.DataDir, cacheFileName) }
 
 func (s *Service) loadCache() {
@@ -251,6 +307,7 @@ func (s *Service) loadCache() {
 	}
 	if len(file.Entries) > 0 {
 		s.cache = file.Entries
+		s.pruneLocked()
 	}
 }
 
