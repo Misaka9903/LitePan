@@ -6,14 +6,14 @@ import (
 	"strings"
 )
 
-var qualityTokenRe = regexp.MustCompile(`(?i)(?:4320[pP]|2160[pP]|1080[pP]|720[pP]|480[pP]|4[Kk]|2[Kk]|8[Kk]|UHD|FHD|FullHD|WEB[-. ]?DL|WEB[-. ]?Rip|BluRay|BDRip|BDMV|BD25|BD50|HDTV|HDTVrip|DVDRip|DVD[-. ]?9|DVD[-. ]?5|REMUX|Repack|Proper|Extended|Director'?s[. ]Cut|Theatrical|Uncut|HDR10\+?|HDR|Dolby[. ]Vision|DoVi|SDR|HLG|10[. ]?bit|8[. ]?bit|H\.?264|H\.?265|HEVC|AVC|x264|x265|VP9|AV1|DTS[-.]?HD[. ]?MA|DTS[-.]?HD[. ]?HRA|DTS[-.]?HD|DTS[-.]?X|DTS|DDP|DD\+|DD|AC3|EAC3|TrueHD|Atmos|FLAC|AAC|OPUS|MP3|PCM|\d{2,3}(?:\.\d+)?fps|MultiAudio|Multi[. ]?Lang)`)
+var qualityTokenRe = regexp.MustCompile(`(?i)(?:4320[pP]|2160[pP]|1080[pP]|720[pP]|480[pP]|4[Kk]|2[Kk]|8[Kk]|UHD|FHD|FullHD|WEB[-. ]?DL|WEB[-. ]?Rip|BluRay|BDRip|BDMV|BD25|BD50|HDTV|HDTVrip|DVDRip|DVD[-. ]?9|DVD[-. ]?5|REMUX|Repack|Proper|Extended|Director'?s[. ]Cut|Theatrical|Uncut|HDR10\+?|HDR|Dolby[. ]Vision|DoVi|SDR|HLG|10[. ]?bit|8[. ]?bit|H\.?264|H\.?265|HEVC|AVC|x264|x265|VP9|AV1|DTS[-.]?HD[. ]?MA|DTS[-.]?HD[. ]?HRA|DTS[-.]?HD|DTS[-.:]?X|DTS|DDP|DD\+|DD|AC3|EAC3|TrueHD|Atmos|FLAC|AAC|OPUS|MP3|PCM|\d{2,3}(?:\.\d+)?fps|MultiAudio|Multi[. ]?Lang)`)
 
 var (
 	combinedAACChannelsRe = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])AAC(\d\.\d)(?:$|[^A-Za-z0-9])`)
 	combinedPCMChannelsRe = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])PCM(\d\.\d)(?:$|[^A-Za-z0-9])`)
 	combinedDDChannelsRe  = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])DD\+?(\d\.\d)(?:$|[^A-Za-z0-9])`)
 	combinedAC3ChannelsRe = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])AC3[-.]?(\d\.\d)(?:$|[^A-Za-z0-9])`)
-	dtsXPatternRe         = regexp.MustCompile(`(?i)DTS[-.]?X`)
+	dtsXPatternRe         = regexp.MustCompile(`(?i)DTS[-.:]?X`)
 	dtsHDMAPatternRe      = regexp.MustCompile(`(?i)DTS[-.]?HD[-.]?MA`)
 	dtsHDHRAPatternRe     = regexp.MustCompile(`(?i)DTS[-.]?HD[-.]?HRA`)
 	dolbyTrueHDPatternRe  = regexp.MustCompile(`(?i)(?:Dolby[-.]?)?TrueHD`)
@@ -324,7 +324,8 @@ func classifyVideoCodecToken(token string) string {
 
 func classifyAudioCodecToken(token string) (string, int) {
 	norm := strings.ToLower(strings.TrimSpace(token))
-	norm = regexp.MustCompile(`[\s._-]+`).ReplaceAllString(norm, " ")
+	// 保留连字符：DTS-HD / DTS-HD MA / DTS:X 靠连字符区分，拆成空格会全部匹配不到。
+	norm = regexp.MustCompile(`[\s._]+`).ReplaceAllString(norm, " ")
 	switch {
 	case strings.Contains(norm, "dts-x"), norm == "dts:x":
 		return "DTS:X", 75
