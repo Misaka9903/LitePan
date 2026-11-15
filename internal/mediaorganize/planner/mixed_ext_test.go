@@ -18,17 +18,23 @@ func mixedEntry(id, name string) batchEntry {
 	return batchEntry{item: domain.FileItem{ID: id, Name: name}}
 }
 
-func seasonKey(title string, season int) groupKey {
-	return groupKey{mediaKind: "tv", title: title, season: season, hasSeason: true}
+// withSeason 给条目补上解析出的季号（剧集的 groupKey 不含季，季来自每个文件的解析结果）。
+func withSeason(e batchEntry, season int) batchEntry {
+	e.fileParsed.Season = &season
+	return e
+}
+
+func showKey() groupKey {
+	return groupKey{mediaKind: "tv", title: "Show"}
 }
 
 func TestMixedExtensionDetectsMixInSeason(t *testing.T) {
 	p := mixedTestPlanner()
 	groups := map[groupKey][]batchEntry{
-		seasonKey("Show", 1): {
-			mixedEntry("1", "Show.S01E01.mkv"),
-			mixedEntry("2", "Show.S01E02.mkv"),
-			mixedEntry("3", "Show.S01E03.mp4"),
+		showKey(): {
+			withSeason(mixedEntry("1", "Show.S01E01.mkv"), 1),
+			withSeason(mixedEntry("2", "Show.S01E02.mkv"), 1),
+			withSeason(mixedEntry("3", "Show.S01E03.mp4"), 1),
 		},
 	}
 	got := p.mixedExtensionShows(groups)
@@ -44,7 +50,10 @@ func TestMixedExtensionDetectsMixInSeason(t *testing.T) {
 func TestMixedExtensionIgnoresUniformSeason(t *testing.T) {
 	p := mixedTestPlanner()
 	groups := map[groupKey][]batchEntry{
-		seasonKey("Show", 1): {mixedEntry("1", "a.mkv"), mixedEntry("2", "b.MKV")},
+		showKey(): {
+			withSeason(mixedEntry("1", "a.mkv"), 1),
+			withSeason(mixedEntry("2", "b.MKV"), 1),
+		},
 	}
 	if got := p.mixedExtensionShows(groups); len(got) != 0 {
 		t.Fatalf("大小写不同不应算混装，得到 %v", got)
@@ -53,11 +62,11 @@ func TestMixedExtensionIgnoresUniformSeason(t *testing.T) {
 
 func TestMixedExtensionIgnoresSpecials(t *testing.T) {
 	p := mixedTestPlanner()
-	sp := mixedEntry("3", "Show.SP01.mp4")
+	sp := withSeason(mixedEntry("3", "Show.SP01.mp4"), 1)
 	sp.specialLabel = "SP01"
 	groups := map[groupKey][]batchEntry{
-		seasonKey("Show", 1): {
-			mixedEntry("1", "Show.S01E01.mkv"),
+		showKey(): {
+			withSeason(mixedEntry("1", "Show.S01E01.mkv"), 1),
 			sp,
 		},
 	}
@@ -69,9 +78,9 @@ func TestMixedExtensionIgnoresSpecials(t *testing.T) {
 func TestMixedExtensionTreatsSeasonZeroAsNormal(t *testing.T) {
 	p := mixedTestPlanner()
 	groups := map[groupKey][]batchEntry{
-		seasonKey("Show", 0): {
-			mixedEntry("1", "Show.S00E01.mkv"),
-			mixedEntry("2", "Show.S00E02.mp4"),
+		showKey(): {
+			withSeason(mixedEntry("1", "Show.S00E01.mkv"), 0),
+			withSeason(mixedEntry("2", "Show.S00E02.mp4"), 0),
 		},
 	}
 	got := p.mixedExtensionShows(groups)
@@ -100,11 +109,13 @@ func TestApplyMixedExtensionGuardSkipsWholeShow(t *testing.T) {
 		skipMixedExt: true,
 		log:          func(msg string) { logs = append(logs, msg) },
 	}
-	s1 := seasonKey("Show", 1)
-	s2 := seasonKey("Show", 2)
+	// 剧集的 groupKey 不含季号：整部剧就是一个组
 	groups := map[groupKey][]batchEntry{
-		s1: {mixedEntry("1", "Show.S01E01.mkv"), mixedEntry("2", "Show.S01E02.mp4")},
-		s2: {mixedEntry("3", "Show.S02E01.mkv")},
+		showKey(): {
+			withSeason(mixedEntry("1", "Show.S01E01.mkv"), 1),
+			withSeason(mixedEntry("2", "Show.S01E02.mp4"), 1),
+			withSeason(mixedEntry("3", "Show.S02E01.mkv"), 2),
+		},
 	}
 	p.applyMixedExtensionGuard(groups)
 
@@ -129,7 +140,10 @@ func TestApplyMixedExtensionGuardDisabled(t *testing.T) {
 		skipMixedExt: false,
 	}
 	groups := map[groupKey][]batchEntry{
-		seasonKey("Show", 1): {mixedEntry("1", "a.mkv"), mixedEntry("2", "b.mp4")},
+		showKey(): {
+			withSeason(mixedEntry("1", "a.mkv"), 1),
+			withSeason(mixedEntry("2", "b.mp4"), 1),
+		},
 	}
 	p.applyMixedExtensionGuard(groups)
 	if len(groups) != 1 {

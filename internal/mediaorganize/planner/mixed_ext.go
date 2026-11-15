@@ -17,6 +17,7 @@ import (
 //   - 在 TMDB 匹配之前，可以省掉整部剧的 TMDB 请求。
 //
 // 特典按文件名识别（entry.specialLabel），不参与判定；S0 / Season 0 仍算正片。
+// 注意：剧集的 groupKey 不含季号（季是逐文件算的），所以这里必须按 entry.fileParsed.Season 分季统计。
 func (p *Planner) applyMixedExtensionGuard(groups map[groupKey][]batchEntry) {
 	if !p.skipMixedExt || len(groups) == 0 {
 		return
@@ -48,17 +49,13 @@ func (p *Planner) applyMixedExtensionGuard(groups map[groupKey][]batchEntry) {
 
 // mixedExtensionShows 返回「有混装季的剧」→ 说明文字（不含剧名）。
 func (p *Planner) mixedExtensionShows(groups map[groupKey][]batchEntry) map[string]string {
-	type seasonMix struct {
-		season string
-		counts map[string]int
-	}
-	perShow := make(map[string][]seasonMix)
+	// title -> season(-1 表示未标季) -> 扩展名 -> 计数
+	perShow := make(map[string]map[int]map[string]int)
 
 	for key, items := range groups {
 		if key.mediaKind != "tv" {
 			continue
 		}
-		counts := make(map[string]int, 2)
 		for _, entry := range items {
 			// 特典（SP/OVA/特典/花絮…）不参与判定：它们常与正片来自不同压制组。
 			if entry.specialLabel != "" {
@@ -71,35 +68,50 @@ func (p *Planner) mixedExtensionShows(groups map[groupKey][]batchEntry) map[stri
 			if _, ok := p.mediaExts[ext]; !ok {
 				continue
 			}
-			counts[ext]++
+			season := -1
+			if entry.fileParsed.Season != nil {
+				season = *entry.fileParsed.Season
+			}
+			if perShow[key.title] == nil {
+				perShow[key.title] = make(map[int]map[string]int)
+			}
+			if perShow[key.title][season] == nil {
+				perShow[key.title][season] = make(map[string]int, 2)
+			}
+			perShow[key.title][season][ext]++
 		}
-		if len(counts) < 2 {
-			continue
-		}
-		perShow[key.title] = append(perShow[key.title], seasonMix{season: seasonLabelOf(key), counts: counts})
 	}
 
 	out := make(map[string]string, len(perShow))
 	for title, seasons := range perShow {
-		sort.Slice(seasons, func(i, j int) bool { return seasons[i].season < seasons[j].season })
-		parts := make([]string, 0, len(seasons))
-		for i, s := range seasons {
+		bad := make([]int, 0, len(seasons))
+		for season, counts := range seasons {
+			if len(counts) >= 2 {
+				bad = append(bad, season)
+			}
+		}
+		if len(bad) == 0 {
+			continue
+		}
+		sort.Ints(bad)
+		parts := make([]string, 0, len(bad))
+		for i, season := range bad {
 			if i >= 2 {
-				parts = append(parts, fmt.Sprintf("等 %d 季存在多种扩展名", len(seasons)))
+				parts = append(parts, fmt.Sprintf("等 %d 季存在多种扩展名", len(bad)))
 				break
 			}
-			parts = append(parts, fmt.Sprintf("%s存在多种扩展名（%s）", s.season, formatExtensionCounts(s.counts)))
+			parts = append(parts, fmt.Sprintf("%s存在多种扩展名（%s）", seasonLabel(season), formatExtensionCounts(seasons[season])))
 		}
 		out[title] = strings.Join(parts, "；")
 	}
 	return out
 }
 
-func seasonLabelOf(key groupKey) string {
-	if key.hasSeason {
-		return fmt.Sprintf("第 %d 季", key.season)
+func seasonLabel(season int) string {
+	if season < 0 {
+		return "未标季"
 	}
-	return "未标季"
+	return fmt.Sprintf("第 %d 季", season)
 }
 
 // formatExtensionCounts 输出形如 "mkv×11 / mp4×1"，按数量降序、同数量按扩展名升序。
