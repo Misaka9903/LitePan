@@ -423,6 +423,10 @@ func NewRouter(d Deps) http.Handler {
 					r.Post("/test-tmdb", h.testMediaOrganizeTMDB)
 					r.Get("/search-tmdb", h.searchMediaOrganizeTMDB)
 					r.Post("/tasks/{id}/bindings", h.setMediaOrganizeBinding)
+					r.Post("/audit", h.runMediaOrganizeAudit)
+					r.Get("/audits", h.listMediaOrganizeAudits)
+					r.Get("/audit/{id}", h.getMediaOrganizeAudit)
+					r.Get("/audit/{id}/export", h.exportMediaOrganizeAudit)
 				})
 				r.Route("/strm-scrape", func(r chi.Router) {
 					r.Get("/settings", h.getStrmScrapeSettings)

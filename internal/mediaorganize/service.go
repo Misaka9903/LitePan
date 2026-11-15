@@ -52,6 +52,9 @@ type Service struct {
 	runningAccounts map[string]int64
 	// pendingDelete 记录运行期间被请求删除的任务。
 	pendingDelete map[string]struct{}
+	// auditReports / auditOrder 保存进程内的信息体检报告（有 TTL 与条数上限）。
+	auditReports map[string]*AuditReport
+	auditOrder   []string
 }
 
 type ServiceOptions struct {

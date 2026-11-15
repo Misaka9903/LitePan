@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -522,4 +523,74 @@ func defaultString(val, fallback string) string {
 		return fallback
 	}
 	return val
+}
+
+// ---- 信息体检（audit）----
+
+type mediaOrganizeAuditDTO struct {
+	AccountID int64    `json:"account_id"`
+	RootID    string   `json:"root_id"`
+	RootName  string   `json:"root_name"`
+	Required  []string `json:"required"`
+	Unit      string   `json:"unit"`
+	Exts      string   `json:"exts"`
+}
+
+func (h *Handler) runMediaOrganizeAudit(w http.ResponseWriter, r *http.Request) {
+	if !ensureServiceReady(w, h.mediaOrganize != nil) {
+		return
+	}
+	var in mediaOrganizeAuditDTO
+	if err := decodeJSON(r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	report, err := h.mediaOrganize.RunAudit(r.Context(), mediaorganize.AuditRequest{
+		AccountID: in.AccountID,
+		RootID:    in.RootID,
+		RootName:  in.RootName,
+		Required:  in.Required,
+		Unit:      in.Unit,
+		Exts:      in.Exts,
+	})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeOK(w, report)
+}
+
+func (h *Handler) getMediaOrganizeAudit(w http.ResponseWriter, r *http.Request) {
+	if !ensureServiceReady(w, h.mediaOrganize != nil) {
+		return
+	}
+	report, ok := h.mediaOrganize.GetAudit(chi.URLParam(r, "id"))
+	if !ok {
+		writeErr(w, domain.Errorf(domain.CodeNotFound, "体检报告不存在或已过期"))
+		return
+	}
+	writeOK(w, report)
+}
+
+func (h *Handler) listMediaOrganizeAudits(w http.ResponseWriter, r *http.Request) {
+	if !ensureServiceReady(w, h.mediaOrganize != nil) {
+		return
+	}
+	writeOK(w, h.mediaOrganize.ListAudits())
+}
+
+func (h *Handler) exportMediaOrganizeAudit(w http.ResponseWriter, r *http.Request) {
+	if !ensureServiceReady(w, h.mediaOrganize != nil) {
+		return
+	}
+	data, ok := h.mediaOrganize.AuditCSV(chi.URLParam(r, "id"))
+	if !ok {
+		writeErr(w, domain.Errorf(domain.CodeNotFound, "体检报告不存在或已过期"))
+		return
+	}
+	filename := "media-audit-" + chi.URLParam(r, "id") + ".csv"
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(data)
 }

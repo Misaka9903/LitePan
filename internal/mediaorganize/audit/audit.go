@@ -45,6 +45,8 @@ type Options struct {
 
 // Bucket 是同一目录、同一扩展名的一组同源文件，一季通常是一个桶。
 type Bucket struct {
+	// DirID 是桶所在目录的 file id，后续移动要用。
+	DirID   string
 	DirPath string
 	Ext     string
 	Sample  string
@@ -58,6 +60,8 @@ type Bucket struct {
 
 // Group 是归集单位：一部剧（Unit=show）或一季目录（Unit=season）。
 type Group struct {
+	// ID 是归集单位的目录 file id（Unit=show 时为根目录下一层的目录）。
+	ID      string
 	Name    string
 	Path    string
 	Files   int
@@ -94,13 +98,16 @@ func Run(root Node, opts Options) Report {
 	}
 	groups := map[string]*Group{}
 	order := make([]string, 0, 16)
+	ids := map[string]string{}
 
-	walk(root, "", func(path string, dir Node, files []Node) {
-		for _, b := range judgeDir(path, files, required, exts) {
+	walk(root, "", func(path string, dir Node) {
+		ids[path] = dir.ID
+	}, func(path string, dir Node, files []Node) {
+		for _, b := range judgeDir(path, dir.ID, files, required, exts) {
 			key, name, gpath := groupKey(unit, path, root.Name)
 			g, ok := groups[key]
 			if !ok {
-				g = &Group{Name: name, Path: gpath}
+				g = &Group{ID: ids[gpath], Name: name, Path: gpath}
 				groups[key] = g
 				order = append(order, key)
 			}
@@ -133,9 +140,13 @@ func Run(root Node, opts Options) Report {
 	return rep
 }
 
-// walk 深度优先遍历，回调里给出目录相对路径与该目录下的文件节点。
-// 根节点本身不参与归集，避免"根目录文件"被当成一部剧。
-func walk(n Node, prefix string, fn func(path string, dir Node, files []Node)) {
+// walk 深度优先遍历。
+// onDir 对每个目录都会调用（用来建立 path→id 映射），
+// fn 只对有文件的目录调用，给出该目录相对路径与文件节点。
+func walk(n Node, prefix string, onDir func(path string, dir Node), fn func(path string, dir Node, files []Node)) {
+	if n.IsDir && onDir != nil {
+		onDir(prefix, n)
+	}
 	var subdirs []Node
 	var files []Node
 	for _, c := range n.Children {
@@ -153,12 +164,12 @@ func walk(n Node, prefix string, fn func(path string, dir Node, files []Node)) {
 		if prefix != "" {
 			p = prefix + "/" + d.Name
 		}
-		walk(d, p, fn)
+		walk(d, p, onDir, fn)
 	}
 }
 
 // judgeDir 把一个目录里的文件按扩展名分桶并判定。
-func judgeDir(path string, files []Node, required []string, exts map[string]struct{}) []Bucket {
+func judgeDir(path, dirID string, files []Node, required []string, exts map[string]struct{}) []Bucket {
 	byExt := map[string][]Node{}
 	for _, f := range files {
 		ext := strings.ToLower(extOf(f.Name))
@@ -180,7 +191,7 @@ func judgeDir(path string, files []Node, required []string, exts map[string]stru
 	for _, ext := range extNames {
 		group := byExt[ext]
 		sort.Slice(group, func(i, j int) bool { return group[i].Name < group[j].Name })
-		b := Bucket{DirPath: path, Ext: ext, Sample: group[0].Name, Files: len(group)}
+		b := Bucket{DirID: dirID, DirPath: path, Ext: ext, Sample: group[0].Name, Files: len(group)}
 		for _, f := range group {
 			b.Bytes += f.Size
 		}
