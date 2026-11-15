@@ -111,7 +111,10 @@ func (s *Service) RunAudit(ctx context.Context, req AuditRequest) (*AuditReport,
 		return nil, domain.Errorf(domain.CodeValidation, "没有可判定的媒体信息项，请先在设置里配置媒体信息顺序")
 	}
 
-	rep, dirs, err := runAudit(ctx, s.files, req, required, unit)
+	// 取树会打出上百个请求，走和整理任务同一套「API 额外补偿间隔」，
+	// 避免体检绕过限速设置把网盘打出风控。
+	scanCtx := s.withAPIDelay(ctx)
+	rep, dirs, err := runAudit(scanCtx, s.files, req, required, unit)
 	if err != nil {
 		return nil, err
 	}
