@@ -594,3 +594,36 @@ func (h *Handler) exportMediaOrganizeAudit(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(data)
 }
+
+type mediaAuditMoveDTO struct {
+	TargetID       string `json:"target_id"`
+	TargetParentID string `json:"target_parent_id"`
+	TargetName     string `json:"target_name"`
+	DryRun         *bool  `json:"dry_run"`
+}
+
+func (h *Handler) moveMediaOrganizeAudit(w http.ResponseWriter, r *http.Request) {
+	if !ensureServiceReady(w, h.mediaOrganize != nil) {
+		return
+	}
+	var in mediaAuditMoveDTO
+	if err := decodeJSON(r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	dryRun := true
+	if in.DryRun != nil {
+		dryRun = *in.DryRun
+	}
+	out, err := h.mediaOrganize.MoveAuditGroups(r.Context(), chi.URLParam(r, "id"), mediaorganize.AuditMoveRequest{
+		TargetID:       in.TargetID,
+		TargetParentID: in.TargetParentID,
+		TargetName:     in.TargetName,
+		DryRun:         dryRun,
+	})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeOK(w, out)
+}

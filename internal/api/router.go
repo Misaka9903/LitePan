@@ -427,6 +427,7 @@ func NewRouter(d Deps) http.Handler {
 					r.Get("/audits", h.listMediaOrganizeAudits)
 					r.Get("/audit/{id}", h.getMediaOrganizeAudit)
 					r.Get("/audit/{id}/export", h.exportMediaOrganizeAudit)
+					r.Post("/audit/{id}/move", h.moveMediaOrganizeAudit)
 				})
 				r.Route("/strm-scrape", func(r chi.Router) {
 					r.Get("/settings", h.getStrmScrapeSettings)

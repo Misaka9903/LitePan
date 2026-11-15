@@ -325,3 +325,32 @@ export function listMediaOrganizeAudits() {
     "/admin/media-organize/audits",
   );
 }
+
+export interface MediaAuditMoveResult {
+  dry_run: boolean;
+  target_id: string;
+  target_name: string;
+  would_create: boolean;
+  total: number;
+  moved: number;
+  failed: number;
+  skipped: number;
+  files: number;
+  bytes: number;
+  items?: Array<{ id: string; name: string; files: number; bytes: number; ok: boolean; error?: string; skipped?: boolean }>;
+}
+
+export interface MediaAuditMoveRequest {
+  target_id?: string;
+  target_parent_id?: string;
+  target_name?: string;
+  dry_run?: boolean;
+}
+
+export function moveMediaOrganizeAudit(id: string, payload: MediaAuditMoveRequest) {
+  return http.postWithTimeout<MediaAuditMoveResult>(
+    `/admin/media-organize/audit/${id}/move`,
+    payload,
+    30 * 60 * 1000,
+  );
+}

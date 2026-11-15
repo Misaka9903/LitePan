@@ -2,8 +2,8 @@
 import { computed, onMounted, ref } from "vue";
 import { storeToRefs } from "pinia";
 import { getApiErrorMessage } from "@/api/client";
-import type { MediaAuditGroup, MediaAuditReport } from "@/api/mediaOrganize";
-import { runMediaOrganizeAudit } from "@/api/mediaOrganize";
+import type { MediaAuditGroup, MediaAuditMoveResult, MediaAuditReport } from "@/api/mediaOrganize";
+import { moveMediaOrganizeAudit, runMediaOrganizeAudit } from "@/api/mediaOrganize";
 import { useAccountsStore } from "@/stores/accounts";
 import AppButton from "@/components/base/AppButton.vue";
 import AccountFolderField from "@/components/admin/AccountFolderField.vue";
@@ -18,6 +18,11 @@ const { accounts } = storeToRefs(accountsStore);
 const activeAccounts = computed(() => accounts.value.filter((a) => a.is_active));
 
 const pickerOpen = ref(false);
+const movePickerOpen = ref(false);
+const moveTargetId = ref("");
+const moveTargetName = ref("");
+const moving = ref(false);
+const moveResult = ref<MediaAuditMoveResult | null>(null);
 const rootId = ref("");
 const rootName = ref("");
 const accountId = ref<number>(0);
@@ -89,6 +94,52 @@ function seasonCount(group: MediaAuditGroup) {
 
 function sampleOf(group: MediaAuditGroup) {
   return group.seasons[0]?.sample ?? "";
+}
+
+function openMovePicker() {
+  if (!report.value?.summary.bad_groups) {
+    toast.error("没有不合格的剧可移动");
+    return;
+  }
+  movePickerOpen.value = true;
+}
+
+function onMoveTargetPicked(payload: { accountId: number; parentId: string; path: string }) {
+  moveTargetId.value = payload.parentId;
+  moveTargetName.value = payload.path || "/";
+  movePickerOpen.value = false;
+  moveResult.value = null;
+}
+
+async function doMove(dryRun: boolean) {
+  const data = report.value;
+  if (!data) {
+    return;
+  }
+  if (!moveTargetId.value) {
+    toast.error("请先选择目标目录");
+    return;
+  }
+  moving.value = true;
+  try {
+    const result = await moveMediaOrganizeAudit(data.id, {
+      target_id: moveTargetId.value,
+      dry_run: dryRun,
+    });
+    moveResult.value = result;
+    if (dryRun) {
+      toast.success(`将移动 ${result.total} 部、${result.files} 个文件`);
+    } else {
+      toast.success(`已移动 ${result.moved} 部${result.failed ? `，失败 ${result.failed} 部` : ""}`);
+      if (result.moved > 0) {
+        await startAudit();
+      }
+    }
+  } catch (error) {
+    toast.error(getApiErrorMessage(error, dryRun ? "预览失败" : "移动失败"));
+  } finally {
+    moving.value = false;
+  }
 }
 
 function exportCsv() {
@@ -165,6 +216,34 @@ onMounted(() => {
       </label>
     </div>
 
+    <div v-if="report && summary && summary.bad_groups > 0" class="audit-move">
+      <span class="audit-move__label">归集不合格剧集</span>
+      <AccountFolderField
+        :display="moveTargetName"
+        placeholder="选择归集目标目录"
+        @browse="openMovePicker"
+      />
+      <AppButton type="button" variant="ghost" :disabled="moving" @click="doMove(true)">预览移动</AppButton>
+      <AppButton
+        type="button"
+        variant="primary"
+        :disabled="moving || !moveResult || moveResult.dry_run !== true"
+        @click="doMove(false)"
+      >
+        {{ moving ? "处理中…" : "执行移动" }}
+      </AppButton>
+      <span v-if="moveResult" class="audit-move__result">
+        <template v-if="moveResult.dry_run">
+          将移动 <b>{{ moveResult.total }}</b> 部 / <b>{{ moveResult.files }}</b> 文件 /
+          <b>{{ formatSize(moveResult.bytes) }}</b>
+          <template v-if="moveResult.would_create">（目标目录将自动创建）</template>
+        </template>
+        <template v-else>
+          已移动 <b>{{ moveResult.moved }}</b> 部，失败 <b>{{ moveResult.failed }}</b> 部
+        </template>
+      </span>
+    </div>
+
     <AdminEmptyState
       v-if="!report && !scanning"
       icon="hand-folder"
@@ -206,6 +285,16 @@ onMounted(() => {
         </tbody>
       </table>
     </div>
+
+    <FolderPickerModal
+      :open="movePickerOpen"
+      :account-id="accountId || null"
+      :accounts="activeAccounts"
+      :initial-path="moveTargetName"
+      title="选择归集目标目录"
+      @close="movePickerOpen = false"
+      @resolve="onMoveTargetPicked"
+    />
 
     <FolderPickerModal
       :open="pickerOpen"
@@ -276,6 +365,26 @@ onMounted(() => {
   align-items: center;
   gap: 6px;
   margin-left: auto;
+}
+
+.audit-move {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.audit-move__label {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.audit-move__result {
+  font-size: 13px;
+  color: var(--text-muted);
 }
 
 .audit-loading {
