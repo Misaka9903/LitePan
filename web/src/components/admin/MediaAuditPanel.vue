@@ -98,7 +98,7 @@ function sampleOf(group: MediaAuditGroup) {
 
 function openMovePicker() {
   if (!report.value?.summary.bad_groups) {
-    toast.error("没有不合格的剧可移动");
+    toast.error("没有不合格的作品可移动");
     return;
   }
   movePickerOpen.value = true;
@@ -190,9 +190,9 @@ onMounted(() => {
       />
       <label class="audit-unit">
         <span>归集单位</span>
-        <select v-model="unit" class="audit-select">
-          <option value="show">整部剧</option>
-          <option value="season">按季</option>
+        <select v-model="unit" class="audit-select" title="剧集选「整部作品」；一片一目录的电影库也选这个；分平铺目录选「按目录」">
+          <option value="show">整部作品</option>
+          <option value="season">按目录</option>
         </select>
       </label>
       <AppButton type="button" variant="primary" :disabled="scanning" @click="startAudit">
@@ -247,7 +247,7 @@ onMounted(() => {
       v-if="!report && !scanning"
       icon="hand-folder"
       title="还没有体检结果"
-      description="选一个目录后开始体检：按文件名里解析出的分辨率、视频编码、音频编码判定，缺项的剧会被列出来。"
+      description="选一个目录后开始体检：按文件名解析出的分辨率、视频编码、音频编码判定，缺项的作品会被列出来。"
     />
 
     <div v-else-if="scanning" class="audit-loading">正在拉取目录树并判定…</div>
@@ -258,8 +258,8 @@ onMounted(() => {
       <table class="admin-table audit-table">
         <thead>
           <tr>
-            <th>剧集</th>
-            <th class="audit-table__season-col">季</th>
+            <th>作品</th>
+            <th class="audit-table__season-col">目录</th>
             <th>样本文件</th>
             <th class="audit-table__missing-col">缺失</th>
             <th class="audit-table__num-col">文件</th>

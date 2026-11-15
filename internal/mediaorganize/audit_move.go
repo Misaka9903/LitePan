@@ -122,7 +122,13 @@ func moveAuditGroups(ctx context.Context, rep *AuditReport, mover auditMover, re
 			out.Items = append(out.Items, item)
 			continue
 		}
-		if g.ID == targetID {
+		if g.ID == rootID {
+			item.Skipped = true
+			item.OK = true
+			item.Error = "分组就是体检根目录本身，跳过"
+			out.Skipped++
+			out.Items = append(out.Items, item)
+		} else if g.ID == targetID {
 			item.Skipped = true
 			item.OK = true
 			out.Skipped++

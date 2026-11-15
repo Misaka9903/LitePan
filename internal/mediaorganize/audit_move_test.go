@@ -139,6 +139,19 @@ func TestMoveAuditGroupsSkipsTargetItself(t *testing.T) {
 	}
 }
 
+func TestMoveAuditGroupsSkipsRootGroup(t *testing.T) {
+	rep := badReport()
+	rep.Groups = []AuditGroup{{ID: "root", Name: "电影", Files: 3, Missing: []string{"audio_codec"}}}
+	mover := &fakeMover{}
+	out, err := moveAuditGroups(context.Background(), rep, mover, AuditMoveRequest{TargetID: "dest"})
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if out.Skipped != 1 || len(mover.moved) != 0 {
+		t.Fatalf("分组就是根目录时应跳过, 结果 %+v", out)
+	}
+}
+
 func TestMoveAuditGroupsRejectsSeasonUnit(t *testing.T) {
 	rep := badReport()
 	rep.Request.Unit = auditUnitSeason
