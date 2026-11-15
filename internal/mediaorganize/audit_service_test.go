@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"litepan/internal/domain"
+	"litepan/internal/driver"
 )
 
 // fakeAuditLister 用 parentID→子项 的映射模拟网盘目录。
@@ -103,5 +104,110 @@ func TestNewAuditIDUnique(t *testing.T) {
 	a, b := newAuditID(), newAuditID()
 	if a == b || !strings.HasPrefix(a, "audit_") {
 		t.Fatalf("ID 生成异常: %q / %q", a, b)
+	}
+}
+
+// fakeFullLister 同时支持全量文件列表，用来验证「全量文件 + 按需目录名」的取树路。
+type fakeFullLister struct {
+	fakeAuditLister
+	full      bool
+	entries   []driver.FullListEntry
+	fullErr   error
+	fullCalls int
+}
+
+func (f *fakeFullLister) SupportsFullList(context.Context, int64) (bool, error) { return f.full, nil }
+
+func (f *fakeFullLister) ListAllFiles(_ context.Context, _ int64, _ string) ([]driver.FullListEntry, error) {
+	f.fullCalls++
+	return f.entries, f.fullErr
+}
+
+func TestTreeFromFullFilesShowStructure(t *testing.T) {
+	// 韩剧结构：root/剧名/Season/文件 —— 只需要列 root 和每个剧名，共 3 次 List
+	f := &fakeFullLister{
+		full: true,
+		fakeAuditLister: fakeAuditLister{lists: map[string][]domain.FileItem{
+			"root": {
+				{ID: "show1", Name: "剧A (2020)", IsDir: true},
+				{ID: "show2", Name: "剧B (2021)", IsDir: true},
+			},
+			"show1": {{ID: "s1", Name: "Season 01", IsDir: true}},
+			"show2": {{ID: "s2", Name: "Season 01", IsDir: true}},
+		}},
+		entries: []driver.FullListEntry{
+			{FileID: "f1", ParentID: "s1", Name: "剧A (2020) S01E01 [2160p H.265 AAC].mkv", Size: 1},
+			{FileID: "f2", ParentID: "s1", Name: "剧A (2020) S01E02 [2160p H.265 AAC].mkv", Size: 1},
+			{FileID: "f3", ParentID: "s2", Name: "剧B (2021) S01E01 [1080p H.264].mkv", Size: 1},
+		},
+	}
+	rep, dirs, err := runAudit(context.Background(), f, AuditRequest{RootID: "root", RootName: "韩剧"},
+		[]string{"video_codec", "audio_codec"}, auditUnitShow)
+	if err != nil {
+		t.Fatalf("runAudit: %v", err)
+	}
+	if dirs != 3 {
+		t.Fatalf("列目录次数 = %d, 期望 3（root + 两个剧名）", dirs)
+	}
+	if rep.TotalGroups != 2 || rep.BadGroups != 1 {
+		t.Fatalf("分组 %d/不合格 %d, 期望 2/1", rep.TotalGroups, rep.BadGroups)
+	}
+}
+
+func TestTreeFromFullFilesMovieStructure(t *testing.T) {
+	// 电影结构：root/片名/文件 —— 只列 root 一次
+	f := &fakeFullLister{
+		full: true,
+		fakeAuditLister: fakeAuditLister{lists: map[string][]domain.FileItem{
+			"root": {
+				{ID: "m1", Name: "七宗罪 (1995)", IsDir: true},
+				{ID: "m2", Name: "1917 (2019)", IsDir: true},
+			},
+		}},
+		entries: []driver.FullListEntry{
+			{FileID: "f1", ParentID: "m1", Name: "七宗罪 (1995) [2160p H.265 DDP 5.1].mkv"},
+			{FileID: "f2", ParentID: "m2", Name: "1917 (2019) [2160p].mkv"},
+		},
+	}
+	rep, dirs, err := runAudit(context.Background(), f, AuditRequest{RootID: "root", RootName: "电影"},
+		[]string{"screen_size", "video_codec", "audio_codec"}, auditUnitShow)
+	if err != nil {
+		t.Fatalf("runAudit: %v", err)
+	}
+	if dirs != 1 {
+		t.Fatalf("列目录次数 = %d, 期望 1（只列 root）", dirs)
+	}
+	if rep.BadGroups != 1 {
+		t.Fatalf("不合格 = %d, 期望 1（1917 缺编码）", rep.BadGroups)
+	}
+}
+
+func TestTreeFromFullFilesFallsBackWhenIncomplete(t *testing.T) {
+	// 全量列表声明 2 个文件，但按剪枝规则只能挂上 1 个 → 必须退回逐目录遍历
+	f := &fakeFullLister{
+		full: true,
+		fakeAuditLister: fakeAuditLister{lists: map[string][]domain.FileItem{
+			"root": {{ID: "show", Name: "剧 (2020)", IsDir: true}},
+			"show": {{ID: "s1", Name: "Season 01", IsDir: true}, {ID: "s2", Name: "Season 02", IsDir: true}},
+			"s1":   {{ID: "f1", Name: "剧 (2020) S01E01 [1080p H.264 AAC].mkv"}},
+			"s2":   {{ID: "f2", Name: "剧 (2020) S02E01 [1080p H.264 AAC].mkv"}},
+		}},
+		// 故意把两个文件都算在 s1 名下，剪枝会跳过 s2
+		entries: []driver.FullListEntry{
+			{FileID: "f1", ParentID: "s1", Name: "剧 (2020) S01E01 [1080p H.264 AAC].mkv"},
+			{FileID: "f9", ParentID: "s1", Name: "剧 (2020) S01E09 [1080p H.264 AAC].mkv"},
+		},
+	}
+	// s2 的 f2 只有靠逐目录遍历才看得到
+	if _, _, err := treeFromFullFiles(context.Background(), f, f, 0, "root", "韩剧"); err == nil {
+		t.Fatalf("文件数不匹配时应返回错误以便退回")
+	}
+	rep, _, err := runAudit(context.Background(), f, AuditRequest{RootID: "root", RootName: "韩剧"},
+		[]string{"video_codec"}, auditUnitShow)
+	if err != nil {
+		t.Fatalf("退回后仍应成功: %v", err)
+	}
+	if rep.TotalFiles != 2 {
+		t.Fatalf("退回逐目录后应看到 2 个文件, 实际 %d", rep.TotalFiles)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"litepan/internal/domain"
+	"litepan/internal/driver"
 	"litepan/internal/mediaorganize/audit"
 	"litepan/internal/settings"
 )
@@ -33,6 +34,13 @@ const (
 // 没有目录名就无法还原分组路径，所以统一走逐目录遍历。
 type auditLister interface {
 	List(ctx context.Context, accountID int64, parentID string, forceRefresh bool) ([]domain.FileItem, error)
+}
+
+// auditFullLister 是可选能力：一次拿到子树里的全部文件（115 的 cur=0 模式，只回文件不回目录）。
+// 有它就能把「逐目录列名字」的请求从「目录数」压到「中间层目录数」。
+type auditFullLister interface {
+	SupportsFullList(ctx context.Context, accountID int64) (bool, error)
+	ListAllFiles(ctx context.Context, accountID int64, parentID string) ([]driver.FullListEntry, error)
 }
 
 // AuditRequest 是一次体检的入参。
@@ -285,7 +293,114 @@ func buildAuditTree(ctx context.Context, lister auditLister, accountID int64, ro
 	if name == "" {
 		name = rootID
 	}
+	if fl, ok := lister.(auditFullLister); ok {
+		if node, dirs, err := treeFromFullFiles(ctx, lister, fl, accountID, rootID, name); err == nil {
+			return node, dirs, nil
+		}
+	}
 	return treeFromList(ctx, lister, accountID, rootID, name)
+}
+
+// treeFromFullFiles 用「一次拉全量文件」+「按需列目录名」重建树。
+//
+// 思路：全量列表只给文件与它的 pid，不给目录名；于是从根开始按层列目录，
+// 一旦某个子目录出现在「有文件的 pid 集合」里，就把它的文件挂上并停止下钻。
+// 结束前核对挂上的文件数是否等于全量文件数，不相等说明结构比假设更深，
+// 直接返回错误让上层退回逐目录遍历，宁可慢也不能出现残缺的树。
+func treeFromFullFiles(ctx context.Context, lister auditLister, fl auditFullLister, accountID int64, rootID, rootName string) (audit.Node, int, error) {
+	supported, err := fl.SupportsFullList(ctx, accountID)
+	if err != nil || !supported {
+		return audit.Node{}, 0, domain.Errorf(domain.CodeNotImplement, "网盘不支持全量文件列表")
+	}
+	entries, err := fl.ListAllFiles(ctx, accountID, rootID)
+	if err != nil {
+		return audit.Node{}, 0, err
+	}
+
+	byParent := make(map[string][]audit.Node, len(entries))
+	for _, e := range entries {
+		byParent[e.ParentID] = append(byParent[e.ParentID], audit.Node{ID: e.FileID, Name: e.Name, Size: e.Size})
+	}
+
+	type dirNode struct {
+		id    string
+		name  string
+		dirs  []*dirNode
+		files []audit.Node
+	}
+
+	root := &dirNode{id: rootID, name: rootName}
+	level := []*dirNode{root}
+	dirs, attached := 0, 0
+
+	for depth := 0; len(level) > 0; depth++ {
+		if depth > auditDepthMax || dirs > auditDirMax {
+			break
+		}
+		listed := make([][]domain.FileItem, len(level))
+		errs := make([]error, len(level))
+		sem := make(chan struct{}, auditListParallel)
+		var wg sync.WaitGroup
+		for i, n := range level {
+			wg.Add(1)
+			go func(i int, n *dirNode) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				items, lerr := lister.List(ctx, accountID, n.id, false)
+				if lerr != nil {
+					errs[i] = lerr
+					return
+				}
+				listed[i] = items
+			}(i, n)
+		}
+		wg.Wait()
+		for _, lerr := range errs {
+			if lerr != nil {
+				return audit.Node{}, dirs, lerr
+			}
+		}
+
+		next := make([]*dirNode, 0, len(level))
+		for i, n := range level {
+			dirs++
+			for _, child := range listed[i] {
+				if !child.IsDir {
+					n.files = append(n.files, audit.Node{ID: child.ID, Name: child.Name, Size: child.Size})
+					attached++
+					continue
+				}
+				cn := &dirNode{id: child.ID, name: child.Name}
+				if files, ok := byParent[child.ID]; ok {
+					// 这个目录本身就有文件：挂上即可，不再下钻（结构比这更深时由结尾的
+					// 文件数校验发现，退回逐目录遍历）。
+					cn.files = append(cn.files, files...)
+					attached += len(files)
+				} else if depth+1 <= auditDepthMax {
+					next = append(next, cn)
+				}
+				n.dirs = append(n.dirs, cn)
+			}
+		}
+		level = next
+	}
+
+	if attached != len(entries) {
+		return audit.Node{}, dirs, domain.Errorf(domain.CodeInternal,
+			"全量文件数与目录结构不匹配（%d/%d）", attached, len(entries))
+	}
+
+	var build func(n *dirNode) audit.Node
+	build = func(n *dirNode) audit.Node {
+		out := audit.Node{ID: n.id, Name: n.name, IsDir: true, Children: make([]audit.Node, 0, len(n.files)+len(n.dirs))}
+		out.Children = append(out.Children, n.files...)
+		for _, c := range n.dirs {
+			out.Children = append(out.Children, build(c))
+		}
+		return out
+	}
+	return build(root), dirs, nil
 }
 
 func treeFromList(ctx context.Context, lister auditLister, accountID int64, rootID, rootName string) (audit.Node, int, error) {
