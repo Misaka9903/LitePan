@@ -125,11 +125,14 @@ func TestRunMixedDoesNotCountAsMissing(t *testing.T) {
 	rep := Run(root, Options{Required: []string{"screen_size", "video_codec", "audio_codec"}})
 
 	g := find(t, rep, "混扩展名 (2021)")
-	if !g.OK() {
-		t.Fatalf("同标签混扩展名不该判缺，实际缺 %v", g.Missing)
+	if len(g.Missing) != 0 {
+		t.Fatalf("标签齐全时不该记缺失，实际缺 %v", g.Missing)
+	}
+	if !g.MixedExt {
+		t.Fatalf("同季混扩展名必须标 MixedExt（整理会被 skip_mixed_ext 跳过）")
 	}
 	if g.Mixed {
-		t.Fatalf("同标签混扩展名不该标混合")
+		t.Fatalf("标签一致，不该标签名混合")
 	}
 
 	g = find(t, rep, "签名不一 (2020)")
@@ -209,5 +212,45 @@ func TestWriteCSV(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("CSV 缺少 %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestRunFlagsMixedExtension(t *testing.T) {
+	root := dir("韩剧", "root",
+		dir("混扩展名 (2021)", "m",
+			dir("Season 03", "m1",
+				file("混扩展名 (2021) S03E01 [1080p H.264 AAC].mkv", 10),
+				file("混扩展名 (2021) S03E16 [1080p H.264 AAC].mp4", 10),
+			),
+		),
+	)
+	rep := Run(root, Options{Required: []string{"screen_size", "video_codec", "audio_codec"}})
+	if rep.BadGroups != 1 {
+		t.Fatalf("同季混扩展名应判不合格, bad=%d", rep.BadGroups)
+	}
+	g := rep.Groups[0]
+	if !g.MixedExt {
+		t.Fatalf("MixedExt 应为 true")
+	}
+	if len(g.Missing) != 0 {
+		t.Fatalf("标签是齐的, 不该记缺失: %v", g.Missing)
+	}
+	if g.OK() {
+		t.Fatalf("混扩展名的组不该 OK")
+	}
+}
+
+func TestRunUniformExtensionNotFlagged(t *testing.T) {
+	root := dir("韩剧", "root",
+		dir("单扩展名 (2021)", "m",
+			dir("Season 01", "m1",
+				file("单扩展名 (2021) S01E01 [1080p H.264 AAC].mkv", 10),
+				file("单扩展名 (2021) S01E02 [1080p H.264 AAC].mkv", 10),
+			),
+		),
+	)
+	rep := Run(root, Options{Required: []string{"video_codec"}})
+	if rep.BadGroups != 0 || rep.Groups[0].MixedExt {
+		t.Fatalf("单一扩展名不该被判混用")
 	}
 }

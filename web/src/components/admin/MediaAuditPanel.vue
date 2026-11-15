@@ -85,6 +85,7 @@ function normalizeGroup(group: MediaAuditGroup): MediaAuditGroup {
   return {
     ...group,
     missing: group.missing ?? [],
+    mixed_ext: group.mixed_ext ?? false,
     seasons: (group.seasons ?? []).map((s) => ({ ...s, missing: s.missing ?? [] })),
   };
 }
@@ -155,7 +156,7 @@ function exportCsv() {
   if (!data) {
     return;
   }
-  const lines = ["剧集,路径,季目录,样本文件,文件数,体积(字节),缺失,混合"];
+  const lines = ["作品,路径,目录,样本文件,文件数,体积(字节),缺失,标签混合,扩展名混用"];
   for (const g of data.groups) {
     for (const s of g.seasons) {
       lines.push(
@@ -168,6 +169,7 @@ function exportCsv() {
           String(s.bytes),
           s.missing.map(labelOf).join("+"),
           s.mixed ? "是" : "",
+          g.mixed_ext ? "是" : "",
         ]
           .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
           .join(","),
@@ -284,7 +286,8 @@ onMounted(() => {
             <td class="audit-sample" :title="sampleOf(group)">{{ sampleOf(group) }}</td>
             <td class="audit-table__missing-col">
               <span v-for="key in group.missing ?? []" :key="key" class="audit-badge">{{ labelOf(key) }}</span>
-              <span v-if="!(group.missing ?? []).length" class="audit-ok">齐全</span>
+              <span v-if="group.mixed_ext" class="audit-badge audit-badge--warn">扩展名混用</span>
+              <span v-if="!(group.missing ?? []).length && !group.mixed_ext" class="audit-ok">齐全</span>
             </td>
             <td class="audit-table__num-col">{{ group.files }}</td>
             <td class="audit-table__num-col">{{ formatSize(group.bytes) }}</td>
@@ -435,6 +438,11 @@ onMounted(() => {
   color: var(--danger, #e5484d);
   font-size: 12px;
   white-space: nowrap;
+}
+
+.audit-badge--warn {
+  background: color-mix(in srgb, #f59e0b 16%, transparent);
+  color: #f59e0b;
 }
 
 .audit-ok {

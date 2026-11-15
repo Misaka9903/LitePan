@@ -284,6 +284,8 @@ export interface MediaAuditGroup {
   bytes: number;
   missing: string[];
   mixed: boolean;
+  /** 同季混用多种媒体扩展名（整理时会被 skip_mixed_ext 跳过） */
+  mixed_ext?: boolean;
   seasons: MediaAuditSeason[];
 }
 

@@ -56,6 +56,8 @@ type Bucket struct {
 	Missing []string
 	// Mixed 桶内文件签名不一致（例如混了 2160p 与 1080p）。
 	Mixed bool
+	// MixedExt 该目录里存在其它媒体扩展名（例如一季里混了 mkv 与 mp4）。
+	MixedExt bool
 }
 
 // Group 是归集单位：一部剧（Unit=show）或一季目录（Unit=season）。
@@ -68,11 +70,13 @@ type Group struct {
 	Bytes   int64
 	Missing []string
 	Mixed   bool
-	Buckets []Bucket
+	// MixedExt 组内任一季度目录存在扩展名不一致。
+	MixedExt bool
+	Buckets  []Bucket
 }
 
 // OK 表示该组信息齐全，不需要搬动。
-func (g Group) OK() bool { return len(g.Missing) == 0 }
+func (g Group) OK() bool { return len(g.Missing) == 0 && !g.MixedExt }
 
 // Report 是一次体检的结果。
 type Report struct {
@@ -103,7 +107,8 @@ func Run(root Node, opts Options) Report {
 	walk(root, "", func(path string, dir Node) {
 		ids[path] = dir.ID
 	}, func(path string, dir Node, files []Node) {
-		for _, b := range judgeDir(path, dir.ID, files, required, exts) {
+		buckets, mixedExt := judgeDir(path, dir.ID, files, required, exts)
+		for _, b := range buckets {
 			key, name, gpath := groupKey(unit, path, root.Name)
 			g, ok := groups[key]
 			if !ok {
@@ -116,6 +121,10 @@ func Run(root Node, opts Options) Report {
 			g.Bytes += b.Bytes
 			if b.Mixed {
 				g.Mixed = true
+			}
+			if mixedExt {
+				b.MixedExt = true
+				g.MixedExt = true
 			}
 			g.Missing = mergeKeys(g.Missing, b.Missing)
 		}
@@ -169,7 +178,7 @@ func walk(n Node, prefix string, onDir func(path string, dir Node), fn func(path
 }
 
 // judgeDir 把一个目录里的文件按扩展名分桶并判定。
-func judgeDir(path, dirID string, files []Node, required []string, exts map[string]struct{}) []Bucket {
+func judgeDir(path, dirID string, files []Node, required []string, exts map[string]struct{}) ([]Bucket, bool) {
 	byExt := map[string][]Node{}
 	for _, f := range files {
 		ext := strings.ToLower(extOf(f.Name))
@@ -179,8 +188,9 @@ func judgeDir(path, dirID string, files []Node, required []string, exts map[stri
 		byExt[ext] = append(byExt[ext], f)
 	}
 	if len(byExt) == 0 {
-		return nil
+		return nil, false
 	}
+	mixedExt := len(byExt) > 1
 	extNames := make([]string, 0, len(byExt))
 	for e := range byExt {
 		extNames = append(extNames, e)
@@ -214,7 +224,7 @@ func judgeDir(path, dirID string, files []Node, required []string, exts map[stri
 		}
 		out = append(out, b)
 	}
-	return out
+	return out, mixedExt
 }
 
 // allMissing 判断整个桶是否都缺某个标签。
@@ -331,7 +341,7 @@ func containsKey(list []string, k string) bool {
 // WriteCSV 把报告写成 CSV，一行一个桶。
 func (r Report) WriteCSV(w io.Writer) error {
 	cw := csv.NewWriter(w)
-	header := []string{"分组", "分组路径", "所在目录", "扩展名", "样本文件", "文件数", "体积", "缺失", "混合"}
+	header := []string{"分组", "分组路径", "所在目录", "扩展名", "样本文件", "文件数", "体积", "缺失", "混合", "扩展名不一致"}
 	if err := cw.Write(header); err != nil {
 		return err
 	}
@@ -347,6 +357,7 @@ func (r Report) WriteCSV(w io.Writer) error {
 				fmt.Sprint(b.Bytes),
 				strings.Join(b.Missing, "+"),
 				boolText(b.Mixed),
+				boolText(b.MixedExt),
 			}
 			if err := cw.Write(row); err != nil {
 				return err

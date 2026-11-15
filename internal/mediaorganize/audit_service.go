@@ -77,15 +77,16 @@ type AuditSeason struct {
 
 // AuditGroup 是一部剧（Unit=show）或一季（Unit=season）。
 type AuditGroup struct {
-	ID      string        `json:"id"`
-	Name    string        `json:"name"`
-	Path    string        `json:"path"`
-	OK      bool          `json:"ok"`
-	Files   int           `json:"files"`
-	Bytes   int64         `json:"bytes"`
-	Missing []string      `json:"missing"`
-	Mixed   bool          `json:"mixed"`
-	Seasons []AuditSeason `json:"seasons"`
+	ID       string        `json:"id"`
+	Name     string        `json:"name"`
+	Path     string        `json:"path"`
+	OK       bool          `json:"ok"`
+	Files    int           `json:"files"`
+	Bytes    int64         `json:"bytes"`
+	Missing  []string      `json:"missing"`
+	Mixed    bool          `json:"mixed"`
+	MixedExt bool          `json:"mixed_ext"`
+	Seasons  []AuditSeason `json:"seasons"`
 }
 
 // AuditReport 是一次体检的结果，进程内保存，供前端取用与导出 CSV。
@@ -268,14 +269,15 @@ func toAuditGroup(g audit.Group) AuditGroup {
 		missing = []string{}
 	}
 	out := AuditGroup{
-		ID:      g.ID,
-		Name:    g.Name,
-		Path:    g.Path,
-		OK:      g.OK(),
-		Files:   g.Files,
-		Bytes:   g.Bytes,
-		Missing: missing,
-		Mixed:   g.Mixed,
+		ID:       g.ID,
+		Name:     g.Name,
+		Path:     g.Path,
+		OK:       g.OK(),
+		Files:    g.Files,
+		Bytes:    g.Bytes,
+		Missing:  missing,
+		Mixed:    g.Mixed,
+		MixedExt: g.MixedExt,
 	}
 	for _, b := range g.Buckets {
 		seasonMissing := b.Missing
