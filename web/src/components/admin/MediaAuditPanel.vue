@@ -209,7 +209,6 @@ onMounted(() => {
       <span>文件 <b>{{ summary.total_files }}</b></span>
       <span>不合格体积 <b>{{ formatSize(summary.bad_bytes) }}</b></span>
       <span>扫描目录 <b>{{ summary.scanned_dirs }}</b></span>
-      <span class="audit-summary__hint">{{ summary.used_full_list ? "全量列表一次拉取" : "逐目录递归" }}</span>
       <label class="audit-filter">
         <input v-model="onlyBad" type="checkbox" />
         只看不合格
@@ -354,10 +353,6 @@ onMounted(() => {
 
 .audit-summary__bad b {
   color: var(--danger, #e5484d);
-}
-
-.audit-summary__hint {
-  opacity: 0.7;
 }
 
 .audit-filter {

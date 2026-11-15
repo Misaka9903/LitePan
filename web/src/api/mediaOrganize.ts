@@ -262,7 +262,6 @@ export interface MediaAuditSummary {
   bad_files: number;
   bad_bytes: number;
   scanned_dirs: number;
-  used_full_list: boolean;
 }
 
 export interface MediaAuditSeason {

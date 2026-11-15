@@ -7,29 +7,32 @@ import (
 	"encoding/json"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"litepan/internal/domain"
-	"litepan/internal/driver"
 	"litepan/internal/mediaorganize/audit"
 	"litepan/internal/settings"
 )
 
 const (
-	auditReportTTL  = 24 * time.Hour
-	auditReportMax  = 20
-	auditDirMax     = 50000
-	auditFileMax    = 400000
-	auditDepthMax   = 24
-	auditUnitShow   = "show"
-	auditUnitSeason = "season"
+	auditReportTTL = 24 * time.Hour
+	auditReportMax = 20
+	auditDirMax    = 50000
+	auditFileMax   = 400000
+	auditDepthMax  = 24
+	// auditListParallel 是取树时每层并发列目录的上限：网盘有风控，别开太大。
+	auditListParallel = 6
+	auditUnitShow     = "show"
+	auditUnitSeason   = "season"
 )
 
 // auditLister 是体检需要的文件列表能力，*file.Service 直接满足；抽成接口便于单测。
+//
+// 不用网盘的「一次拉全量文件」接口：115 的全量列表只返回文件不返回目录，
+// 没有目录名就无法还原分组路径，所以统一走逐目录遍历。
 type auditLister interface {
 	List(ctx context.Context, accountID int64, parentID string, forceRefresh bool) ([]domain.FileItem, error)
-	SupportsFullList(ctx context.Context, accountID int64) (bool, error)
-	ListAllFiles(ctx context.Context, accountID int64, parentID string) ([]driver.FullListEntry, error)
 }
 
 // AuditRequest 是一次体检的入参。
@@ -109,7 +112,7 @@ func (s *Service) RunAudit(ctx context.Context, req AuditRequest) (*AuditReport,
 		return nil, domain.Errorf(domain.CodeValidation, "没有可判定的媒体信息项，请先在设置里配置媒体信息顺序")
 	}
 
-	rep, used, dirs, err := runAudit(ctx, s.files, req, required, unit)
+	rep, dirs, err := runAudit(ctx, s.files, req, required, unit)
 	if err != nil {
 		return nil, err
 	}
@@ -118,13 +121,12 @@ func (s *Service) RunAudit(ctx context.Context, req AuditRequest) (*AuditReport,
 		CreatedAt: time.Now().Unix(),
 		Request:   req,
 		Summary: AuditSummary{
-			TotalGroups:  rep.TotalGroups,
-			BadGroups:    rep.BadGroups,
-			TotalFiles:   rep.TotalFiles,
-			BadFiles:     rep.BadFiles,
-			BadBytes:     rep.BadBytes,
-			ScannedDirs:  dirs,
-			UsedFullList: used,
+			TotalGroups: rep.TotalGroups,
+			BadGroups:   rep.BadGroups,
+			TotalFiles:  rep.TotalFiles,
+			BadFiles:    rep.BadFiles,
+			BadBytes:    rep.BadBytes,
+			ScannedDirs: dirs,
 		},
 		raw: rep,
 	}
@@ -138,12 +140,12 @@ func (s *Service) RunAudit(ctx context.Context, req AuditRequest) (*AuditReport,
 }
 
 // runAudit 拉树并判定，供 RunAudit 与单测共用。
-func runAudit(ctx context.Context, lister auditLister, req AuditRequest, required []string, unit string) (audit.Report, bool, int, error) {
-	tree, used, dirs, err := buildAuditTree(ctx, lister, req.AccountID, req.RootID, req.RootName)
+func runAudit(ctx context.Context, lister auditLister, req AuditRequest, required []string, unit string) (audit.Report, int, error) {
+	tree, dirs, err := buildAuditTree(ctx, lister, req.AccountID, req.RootID, req.RootName)
 	if err != nil {
-		return audit.Report{}, used, dirs, err
+		return audit.Report{}, dirs, err
 	}
-	return audit.Run(tree, audit.Options{Required: required, Unit: unit, Exts: req.Exts}), used, dirs, nil
+	return audit.Run(tree, audit.Options{Required: required, Unit: unit, Exts: req.Exts}), dirs, nil
 }
 
 // GetAudit 取一份缓存中的报告。
@@ -275,89 +277,82 @@ func toAuditGroup(g audit.Group) AuditGroup {
 	return out
 }
 
-// buildAuditTree 拉取 rootID 下的完整目录树。
-// 网盘支持全量列表时一次调用搞定，否则退回逐目录递归（有深度与数量上限）。
-func buildAuditTree(ctx context.Context, lister auditLister, accountID int64, rootID, rootName string) (audit.Node, bool, int, error) {
+// buildAuditTree 拉取 rootID 下的完整目录树（逐目录并行遍历）。
+func buildAuditTree(ctx context.Context, lister auditLister, accountID int64, rootID, rootName string) (audit.Node, int, error) {
 	name := strings.TrimSpace(rootName)
 	if name == "" {
 		name = rootID
 	}
-	full, err := lister.SupportsFullList(ctx, accountID)
-	if err == nil && full {
-		entries, ferr := lister.ListAllFiles(ctx, accountID, rootID)
-		if ferr == nil {
-			node, dirs := treeFromFullList(entries, rootID, name)
-			return node, true, dirs, nil
-		}
-	}
-	node, dirs, rerr := treeFromList(ctx, lister, accountID, rootID, name)
-	if rerr != nil {
-		return audit.Node{}, false, 0, rerr
-	}
-	return node, false, dirs, nil
-}
-
-func treeFromFullList(entries []driver.FullListEntry, rootID, rootName string) (audit.Node, int) {
-	byParent := map[string][]driver.FullListEntry{}
-	dirIDs := map[string]struct{}{rootID: {}}
-	for _, e := range entries {
-		byParent[e.ParentID] = append(byParent[e.ParentID], e)
-		dirIDs[e.ParentID] = struct{}{}
-	}
-	var walk func(id, name string, depth int) audit.Node
-	walk = func(id, name string, depth int) audit.Node {
-		n := audit.Node{ID: id, Name: name, IsDir: true}
-		if depth > auditDepthMax {
-			return n
-		}
-		for _, e := range byParent[id] {
-			if _, isDir := dirIDs[e.FileID]; isDir {
-				n.Children = append(n.Children, walk(e.FileID, e.Name, depth+1))
-				continue
-			}
-			n.Children = append(n.Children, audit.Node{ID: e.FileID, Name: e.Name, Size: e.Size})
-		}
-		return n
-	}
-	root := walk(rootID, rootName, 0)
-	return root, len(dirIDs)
+	return treeFromList(ctx, lister, accountID, rootID, name)
 }
 
 func treeFromList(ctx context.Context, lister auditLister, accountID int64, rootID, rootName string) (audit.Node, int, error) {
-	var (
-		dirs  int
-		files int
-	)
-	var walk func(id, name string, depth int) (audit.Node, error)
-	walk = func(id, name string, depth int) (audit.Node, error) {
-		n := audit.Node{ID: id, Name: name, IsDir: true}
-		dirs++
+	type dirNode struct {
+		id    string
+		name  string
+		dirs  []*dirNode
+		files []audit.Node
+	}
+
+	root := &dirNode{id: rootID, name: rootName}
+	level := []*dirNode{root}
+	dirs, files := 0, 0
+
+	for depth := 0; len(level) > 0; depth++ {
 		if depth > auditDepthMax || dirs > auditDirMax || files > auditFileMax {
-			return n, nil
+			break
 		}
-		items, err := lister.List(ctx, accountID, id, false)
-		if err != nil {
-			return n, err
-		}
-		for _, it := range items {
-			if it.IsDir {
-				child, cerr := walk(it.ID, it.Name, depth+1)
-				if cerr != nil {
-					return n, cerr
+		results := make([][]domain.FileItem, len(level))
+		errs := make([]error, len(level))
+		sem := make(chan struct{}, auditListParallel)
+		var wg sync.WaitGroup
+		for i, n := range level {
+			wg.Add(1)
+			go func(i int, n *dirNode) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				items, err := lister.List(ctx, accountID, n.id, false)
+				if err != nil {
+					errs[i] = err
+					return
 				}
-				n.Children = append(n.Children, child)
-				continue
-			}
-			files++
-			n.Children = append(n.Children, audit.Node{ID: it.ID, Name: it.Name, Size: it.Size})
+				results[i] = items
+			}(i, n)
 		}
-		return n, nil
+		wg.Wait()
+		for _, err := range errs {
+			if err != nil {
+				return audit.Node{}, dirs, err
+			}
+		}
+		next := make([]*dirNode, 0, len(level))
+		for i, n := range level {
+			dirs++
+			for _, item := range results[i] {
+				if item.IsDir {
+					child := &dirNode{id: item.ID, name: item.Name}
+					n.dirs = append(n.dirs, child)
+					next = append(next, child)
+					continue
+				}
+				files++
+				n.files = append(n.files, audit.Node{ID: item.ID, Name: item.Name, Size: item.Size})
+			}
+		}
+		level = next
 	}
-	root, err := walk(rootID, rootName, 0)
-	if err != nil {
-		return audit.Node{}, dirs, err
+
+	var build func(n *dirNode) audit.Node
+	build = func(n *dirNode) audit.Node {
+		out := audit.Node{ID: n.id, Name: n.name, IsDir: true, Children: make([]audit.Node, 0, len(n.files)+len(n.dirs))}
+		out.Children = append(out.Children, n.files...)
+		for _, c := range n.dirs {
+			out.Children = append(out.Children, build(c))
+		}
+		return out
 	}
-	return root, dirs, nil
+	return build(root), dirs, nil
 }
 
 func newAuditID() string {
