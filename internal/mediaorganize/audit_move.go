@@ -3,6 +3,7 @@ package mediaorganize
 import (
 	"context"
 	"strings"
+	"time"
 
 	"litepan/internal/domain"
 )
@@ -133,7 +134,7 @@ func moveAuditGroups(ctx context.Context, rep *AuditReport, mover auditMover, re
 			item.OK = true
 			out.Skipped++
 			out.Items = append(out.Items, item)
-		} else if err := mover.MoveFiles(ctx, rep.Request.AccountID, []string{g.ID}, targetID, rootID); err != nil {
+		} else if err := moveWithRetry(ctx, mover, rep.Request.AccountID, g.ID, targetID, rootID); err != nil {
 			item.Error = err.Error()
 			out.Failed++
 			out.Items = append(out.Items, item)
@@ -146,6 +147,43 @@ func moveAuditGroups(ctx context.Context, rep *AuditReport, mover auditMover, re
 		}
 	}
 	return out, nil
+}
+
+// movePendingHints 是 115 的「上一条操作还没跑完」类错误。这类失败往往稍后自己就成功了，
+// 所以先等一会儿重试，重试完仍失败才记成失败。
+var movePendingHints = []string{"990019", "尚未执行完成", "操作尚未完成"}
+
+func isMovePending(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	for _, hint := range movePendingHints {
+		if strings.Contains(msg, hint) {
+			return true
+		}
+	}
+	return false
+}
+
+// moveWithRetry 对「网盘还在处理上一条操作」做有限重试（3 次，间隔 2s/4s）。
+func moveWithRetry(ctx context.Context, mover auditMover, accountID int64, fileID, targetID, sourceID string) error {
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			wait := time.Duration(attempt) * 2 * time.Second
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(wait):
+			}
+		}
+		err = mover.MoveFiles(ctx, accountID, []string{fileID}, targetID, sourceID)
+		if err == nil || !isMovePending(err) {
+			return err
+		}
+	}
+	return err
 }
 
 // resolveAuditTarget 确定目标目录：直传 ID 优先；否则在 TargetParentID 下按名字找，找不到标记为需创建。

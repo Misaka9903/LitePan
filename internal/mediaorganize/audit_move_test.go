@@ -176,3 +176,43 @@ func TestMoveAuditGroupsRecordsFailure(t *testing.T) {
 		t.Fatalf("失败应记录在条目里: %+v", out)
 	}
 }
+
+type pendingMover struct {
+	fakeMover
+	fails int
+	err   error
+	calls int
+}
+
+func (p *pendingMover) MoveFiles(ctx context.Context, accountID int64, ids []string, target, source string) error {
+	p.calls++
+	if p.calls <= p.fails {
+		return p.err
+	}
+	return p.fakeMover.MoveFiles(ctx, accountID, ids, target, source)
+}
+
+func TestMoveRetriesWhenNetworkStillProcessing(t *testing.T) {
+	m := &pendingMover{fails: 1, err: errors.New("DRIVER_ERROR: 115 API 错误(990019)：移动[x]操作尚未执行完成，请稍后再试！")}
+	out, err := moveAuditGroups(context.Background(), badReport(), m, AuditMoveRequest{TargetID: "dest"})
+	if err != nil {
+		t.Fatalf("重试后应成功: %v", err)
+	}
+	if out.Moved != 1 || out.Failed != 0 {
+		t.Fatalf("结果 = %+v", out)
+	}
+	if m.calls != 2 {
+		t.Fatalf("应重试一次, 实际调用 %d 次", m.calls)
+	}
+}
+
+func TestMoveDoesNotRetryOtherErrors(t *testing.T) {
+	m := &pendingMover{fails: 99, err: errors.New("DRIVER_ERROR: 115 API 错误(990001)：目录不存在")}
+	out, _ := moveAuditGroups(context.Background(), badReport(), m, AuditMoveRequest{TargetID: "dest"})
+	if out.Failed != 1 {
+		t.Fatalf("非「处理中」错误应直接失败: %+v", out)
+	}
+	if m.calls != 1 {
+		t.Fatalf("不该重试, 实际 %d 次", m.calls)
+	}
+}
