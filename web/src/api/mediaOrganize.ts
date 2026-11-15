@@ -252,3 +252,76 @@ export function fetchMediaOrganizeSettings() {
 export function saveMediaOrganizeSettings(settings: Partial<MediaOrganizeSettings>) {
   return http.put<MediaOrganizeSettings>("/admin/media-organize/settings", settings);
 }
+
+// ---- 信息体检（audit）----
+
+export interface MediaAuditSummary {
+  total_groups: number;
+  bad_groups: number;
+  total_files: number;
+  bad_files: number;
+  bad_bytes: number;
+  scanned_dirs: number;
+  used_full_list: boolean;
+}
+
+export interface MediaAuditSeason {
+  dir_id: string;
+  dir_path: string;
+  ext: string;
+  sample: string;
+  files: number;
+  bytes: number;
+  missing: string[];
+  mixed: boolean;
+}
+
+export interface MediaAuditGroup {
+  id: string;
+  name: string;
+  path: string;
+  ok: boolean;
+  files: number;
+  bytes: number;
+  missing: string[];
+  mixed: boolean;
+  seasons: MediaAuditSeason[];
+}
+
+export interface MediaAuditReport {
+  id: string;
+  created_at: number;
+  request: {
+    account_id: number;
+    root_id: string;
+    root_name?: string;
+    required: string[];
+    unit: string;
+    exts?: string;
+  };
+  summary: MediaAuditSummary;
+  groups: MediaAuditGroup[];
+}
+
+export interface MediaAuditRequest {
+  account_id: number;
+  root_id: string;
+  root_name?: string;
+  required?: string[];
+  unit?: "show" | "season";
+  exts?: string;
+}
+
+export function runMediaOrganizeAudit(payload: MediaAuditRequest) {
+  return http.postWithTimeout<MediaAuditReport>("/admin/media-organize/audit", payload, 30 * 60 * 1000);
+}
+
+export function fetchMediaOrganizeAudit(id: string) {
+  return http.get<MediaAuditReport>(`/admin/media-organize/audit/${id}`);
+}
+
+export function listMediaOrganizeAudits() {
+  return http.get<Array<{ id: string; created_at: number; root_id: string; root_name?: string; summary: MediaAuditSummary }>>(
+    "/admin/media-organize/audits",
+  );
+}

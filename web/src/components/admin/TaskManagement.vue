@@ -70,6 +70,7 @@ const CacheRetentionPanel = defineAsyncComponent(() => import("@/components/admi
 const CacheSettingsPanel = defineAsyncComponent(() => import("@/components/admin/CacheSettingsPanel.vue"));
 const AutomationPanel = defineAsyncComponent(() => import("@/components/admin/AutomationPanel.vue"));
 const MediaOrganizePanel = defineAsyncComponent(() => import("@/components/admin/MediaOrganizePanel.vue"));
+const MediaAuditPanel = defineAsyncComponent(() => import("@/components/admin/MediaAuditPanel.vue"));
 const MediaOrganizeSettings = defineAsyncComponent(() => import("@/components/admin/MediaOrganizeSettings.vue"));
 import CacheSignalBand from "@/components/admin/CacheSignalBand.vue";
 import AdminSettingsDrawer from "@/components/admin/AdminSettingsDrawer.vue";
@@ -102,11 +103,13 @@ const CACHE_TAB = "cache";
 const STRM_TAB = "strm";
 const ORGANIZE_TAB = "organize";
 const AUTOMATION_TAB = "automation";
+const AUDIT_TAB = "audit";
 const DEFAULT_STRM_SCAN_INTERVAL_MINUTES = 6 * 60;
 const tabs = [
   { key: STRM_TAB, label: "STRM 任务" },
   { key: CACHE_TAB, label: "缓存任务" },
   { key: ORGANIZE_TAB, label: "目录整理" },
+  { key: AUDIT_TAB, label: "信息体检" },
   { key: AUTOMATION_TAB, label: "自动联动" },
 ];
 
@@ -175,7 +178,7 @@ const { confirmDiscardChanges } = useSettingsPageDirty(settingsPageDirty, revert
 
 const { activeTab, setActiveTab } = useSectionTabRoute(
   STRM_TAB,
-  [STRM_TAB, CACHE_TAB, ORGANIZE_TAB, AUTOMATION_TAB],
+  [STRM_TAB, CACHE_TAB, ORGANIZE_TAB, AUDIT_TAB, AUTOMATION_TAB],
   {
   beforeTabChange: async (_from, _to) => {
     if (!settingsDrawerOpen.value) return true;
@@ -1279,6 +1282,12 @@ watch(activeTab, (tab) => {
           @dismiss="handleHideBand"
         />
         <MediaOrganizePanel ref="organizePanelRef" @stats="organizeTaskStats = $event" />
+      </div>
+    </div>
+
+    <div v-if="tabsVisited[AUDIT_TAB]" v-show="activeTab === AUDIT_TAB">
+      <div class="organize-task-panel">
+        <MediaAuditPanel />
       </div>
     </div>
 
