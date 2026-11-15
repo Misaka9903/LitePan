@@ -81,8 +81,16 @@ async function startAudit() {
   }
 }
 
+function normalizeGroup(group: MediaAuditGroup): MediaAuditGroup {
+  return {
+    ...group,
+    missing: group.missing ?? [],
+    seasons: (group.seasons ?? []).map((s) => ({ ...s, missing: s.missing ?? [] })),
+  };
+}
+
 const rows = computed<MediaAuditGroup[]>(() => {
-  const groups = report.value?.groups ?? [];
+  const groups = (report.value?.groups ?? []).map(normalizeGroup);
   return onlyBad.value ? groups.filter((g) => !g.ok) : groups;
 });
 
@@ -275,8 +283,8 @@ onMounted(() => {
             <td class="audit-table__season-col">{{ seasonCount(group) }}</td>
             <td class="audit-sample" :title="sampleOf(group)">{{ sampleOf(group) }}</td>
             <td class="audit-table__missing-col">
-              <span v-for="key in group.missing" :key="key" class="audit-badge">{{ labelOf(key) }}</span>
-              <span v-if="!group.missing.length" class="audit-ok">齐全</span>
+              <span v-for="key in group.missing ?? []" :key="key" class="audit-badge">{{ labelOf(key) }}</span>
+              <span v-if="!(group.missing ?? []).length" class="audit-ok">齐全</span>
             </td>
             <td class="audit-table__num-col">{{ group.files }}</td>
             <td class="audit-table__num-col">{{ formatSize(group.bytes) }}</td>

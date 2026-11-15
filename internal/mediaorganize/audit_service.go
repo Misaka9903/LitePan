@@ -262,6 +262,11 @@ func normalizeAuditRequired(in []string) []string {
 }
 
 func toAuditGroup(g audit.Group) AuditGroup {
+	// 空切片统一给 []，避免前端拿到 null 后 .length 直接抛错。
+	missing := g.Missing
+	if missing == nil {
+		missing = []string{}
+	}
 	out := AuditGroup{
 		ID:      g.ID,
 		Name:    g.Name,
@@ -269,10 +274,14 @@ func toAuditGroup(g audit.Group) AuditGroup {
 		OK:      g.OK(),
 		Files:   g.Files,
 		Bytes:   g.Bytes,
-		Missing: g.Missing,
+		Missing: missing,
 		Mixed:   g.Mixed,
 	}
 	for _, b := range g.Buckets {
+		seasonMissing := b.Missing
+		if seasonMissing == nil {
+			seasonMissing = []string{}
+		}
 		out.Seasons = append(out.Seasons, AuditSeason{
 			DirID:   b.DirID,
 			DirPath: b.DirPath,
@@ -280,9 +289,12 @@ func toAuditGroup(g audit.Group) AuditGroup {
 			Sample:  b.Sample,
 			Files:   b.Files,
 			Bytes:   b.Bytes,
-			Missing: b.Missing,
+			Missing: seasonMissing,
 			Mixed:   b.Mixed,
 		})
+	}
+	if out.Seasons == nil {
+		out.Seasons = []AuditSeason{}
 	}
 	return out
 }
