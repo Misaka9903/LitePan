@@ -73,6 +73,9 @@ func (p *Planner) planBatch(entries []batchEntry, label string) error {
 		p.diagnostics["groups"] = groupsDiag
 	}
 
+	// 整部剧的扩展名一致性检查（只影响剧集，电影不判定）
+	p.applyMixedExtensionGuard(groups)
+
 	alignDefaults := map[groupKey]map[bucketKey]map[string]any{}
 	if p.alignMediaTags {
 		alignDefaults = p.computeAlignDefaults(groups)

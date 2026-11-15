@@ -102,6 +102,7 @@ const {
   align_media_tags: false,
   probe_enabled: false,
   probe_mode: "prefer",
+  skip_mixed_ext: true,
   max_works_per_run: 50,
   overwrite_existing: false,
 });
@@ -494,6 +495,23 @@ defineExpose(
           </template>
           <template #control>
             <AppInput v-model="settings.max_works_per_run" type="number" min="0" max="10000" placeholder="50" />
+          </template>
+        </SettingsRow>
+
+        <SettingsRow :show-changed-badge="true" :changed="isFieldChanged('skip_mixed_ext')">
+          <template #info>
+            <div class="settings-row__label">
+              <span>扩展名不一致时跳过整部剧</span>
+              <SettingsHelpTooltip title="扩展名不一致说明">
+                <p>同一季里混用多种媒体扩展名（例如 mkv + mp4）时，整部剧都不做任何操作，
+                  在预览的「已跳过」里说明原因，汇总里计入「需关注」。</p>
+                <p>特典按文件名识别（SP / OVA / 特典 / 花絮 等），不参与判定；S0 / Season 0 仍算正片。</p>
+                <p>只作用于剧集，电影不判定。关闭后按原有逻辑照常整理。</p>
+              </SettingsHelpTooltip>
+            </div>
+          </template>
+          <template #control>
+            <SettingsBoolSegment v-model="settings.skip_mixed_ext" label="扩展名不一致时跳过整部剧" />
           </template>
         </SettingsRow>
 
