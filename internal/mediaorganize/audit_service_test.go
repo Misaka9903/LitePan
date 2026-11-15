@@ -2,12 +2,14 @@ package mediaorganize
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 
 	"litepan/internal/domain"
 	"litepan/internal/driver"
+	"litepan/internal/mediaorganize/audit"
 )
 
 // fakeAuditLister 用 parentID→子项 的映射模拟网盘目录。
@@ -209,5 +211,20 @@ func TestTreeFromFullFilesFallsBackWhenIncomplete(t *testing.T) {
 	}
 	if rep.TotalFiles != 2 {
 		t.Fatalf("退回逐目录后应看到 2 个文件, 实际 %d", rep.TotalFiles)
+	}
+}
+
+func TestToAuditGroupSerializesEmptySlices(t *testing.T) {
+	// 前端模板里有 group.missing.length，null 会直接抛错，所以必须是 []。
+	out, err := json.Marshal(toAuditGroup(audit.Group{ID: "s1", Name: "齐全剧"}))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	got := string(out)
+	if !strings.Contains(got, `"missing":[]`) {
+		t.Fatalf("missing 应为空数组, 实际 %s", got)
+	}
+	if !strings.Contains(got, `"seasons":[]`) {
+		t.Fatalf("seasons 应为空数组, 实际 %s", got)
 	}
 }
