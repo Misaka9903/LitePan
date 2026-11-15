@@ -241,6 +241,9 @@ onMounted(() => {
       >
         {{ moving ? "处理中…" : "执行移动" }}
       </AppButton>
+      <span v-if="moveResult && !moveResult.dry_run && moveResult.failed" class="audit-move__failed">
+        失败：{{ (moveResult.items ?? []).filter((i) => !i.ok && !i.skipped).map((i) => i.name).join("、") }}
+      </span>
       <span v-if="moveResult" class="audit-move__result">
         <template v-if="moveResult.dry_run">
           将移动 <b>{{ moveResult.total }}</b> 部 / <b>{{ moveResult.files }}</b> 文件 /
@@ -386,6 +389,11 @@ onMounted(() => {
 .audit-move__label {
   font-size: 13px;
   color: var(--text-muted);
+}
+
+.audit-move__failed {
+  font-size: 13px;
+  color: var(--danger, #e5484d);
 }
 
 .audit-move__result {

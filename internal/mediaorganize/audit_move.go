@@ -65,7 +65,16 @@ func (s *Service) moveAuditGroups(ctx context.Context, rep *AuditReport, req Aud
 	if s == nil || s.files == nil {
 		return nil, domain.Errorf(domain.CodeInternal, "文件服务不可用")
 	}
-	return moveAuditGroups(ctx, rep, s.files, req)
+	out, err := moveAuditGroups(ctx, rep, s.files, req)
+	if err == nil && out != nil && !out.DryRun {
+		if s.log != nil {
+			s.log.Info("归集移动完成",
+				"audit_id", rep.ID, "target_id", out.TargetID,
+				"moved", out.Moved, "failed", out.Failed, "skipped", out.Skipped,
+				"files", out.Files, "bytes", out.Bytes)
+		}
+	}
+	return out, err
 }
 
 // moveAuditGroups 把报告里不合格的剧整体移动到目标目录；mover 抽象出来便于单测。
@@ -146,7 +155,61 @@ func moveAuditGroups(ctx context.Context, rep *AuditReport, mover auditMover, re
 			out.Items = append(out.Items, item)
 		}
 	}
+	reconcileMoves(ctx, mover, rep.Request.AccountID, rootID, out)
 	return out, nil
+}
+
+// reconcileMoves 以「结果」为准修正每部剧的成败。
+//
+// 115 的移动是异步队列，返回的 990019 之类的错误经常和你请求的那一条对不上：
+// 真机上见过「报失败但已移动」和「报成功但没动」。所以移动完重新列一次源目录，
+// 按目录是否还在原处来判定，接口说了什么只当参考。
+func reconcileMoves(ctx context.Context, mover auditMover, accountID int64, rootID string, out *AuditMoveResult) {
+	if out == nil || len(out.Items) == 0 {
+		return
+	}
+	items, err := mover.List(ctx, accountID, rootID, true)
+	if err != nil {
+		return
+	}
+	still := make(map[string]struct{}, len(items))
+	for _, it := range items {
+		if it.IsDir {
+			still[it.ID] = struct{}{}
+		}
+	}
+
+	moved, failed := 0, 0
+	files, bytes := 0, int64(0)
+	for i := range out.Items {
+		it := &out.Items[i]
+		if it.Skipped {
+			continue
+		}
+		_, remains := still[it.ID]
+		switch {
+		case remains && it.OK:
+			// 接口说成功，实际还在原目录
+			it.OK = false
+			it.Error = "移动后仍留在原目录（网盘异步执行，可能稍后才生效）"
+			failed++
+		case !remains && !it.OK:
+			// 接口说失败，实际已经搬走
+			it.OK = true
+			it.Error = ""
+			moved++
+			files += it.Files
+			bytes += it.Bytes
+		case it.OK:
+			moved++
+			files += it.Files
+			bytes += it.Bytes
+		default:
+			failed++
+		}
+	}
+	out.Moved, out.Failed = moved, failed
+	out.Files, out.Bytes = files, bytes
 }
 
 // movePendingHints 是 115 的「上一条操作还没跑完」类错误。这类失败往往稍后自己就成功了，
