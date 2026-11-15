@@ -47,13 +47,12 @@ type AuditRequest struct {
 
 // AuditSummary 是体检的汇总数字。
 type AuditSummary struct {
-	TotalGroups  int   `json:"total_groups"`
-	BadGroups    int   `json:"bad_groups"`
-	TotalFiles   int   `json:"total_files"`
-	BadFiles     int   `json:"bad_files"`
-	BadBytes     int64 `json:"bad_bytes"`
-	ScannedDirs  int   `json:"scanned_dirs"`
-	UsedFullList bool  `json:"used_full_list"`
+	TotalGroups int   `json:"total_groups"`
+	BadGroups   int   `json:"bad_groups"`
+	TotalFiles  int   `json:"total_files"`
+	BadFiles    int   `json:"bad_files"`
+	BadBytes    int64 `json:"bad_bytes"`
+	ScannedDirs int   `json:"scanned_dirs"`
 }
 
 // AuditSeason 是报告里的一季（一个桶）。
