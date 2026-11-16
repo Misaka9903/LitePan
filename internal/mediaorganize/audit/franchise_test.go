@@ -154,3 +154,17 @@ func TestCompareCollectionSequelWithSameNameStaysMissing(t *testing.T) {
 		t.Fatalf("真续集应算缺: missing=%v optional=%v", titles(diff.Missing), titles(diff.Optional))
 	}
 }
+
+// 实测：《为美好的世界献上祝福》合集里混着 52 分钟的 BONUS STAGE，标题还是日文原名，应降为可选。
+func TestCompareCollectionShortSpecialIsOptional(t *testing.T) {
+	movie := part("532067", "为美好的世界献上祝福！红传说", "2019-08-30", 90)
+	parts := []FranchisePart{movie, part("999", "この素晴らしい世界に祝福を！３ーBONUS STAGEー", "2025-03-14", 52)}
+	local := map[string]FranchisePart{"532067": movie}
+	diff := CompareCollection("为美好的世界献上祝福（系列）", parts, local, testToday)
+	if diff.Bad() {
+		t.Fatalf("短篇特典被当成缺续集: %v", titles(diff.Missing))
+	}
+	if len(diff.Optional) != 1 {
+		t.Fatalf("可选数 = %d, 期望 1", len(diff.Optional))
+	}
+}

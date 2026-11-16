@@ -92,6 +92,11 @@ func optionalReason(part FranchisePart, localParts []FranchisePart, collectionNa
 	if len(localParts) == 0 || strings.TrimSpace(part.ReleaseDate) == "" {
 		return ""
 	}
+	if part.Runtime > 0 && part.Runtime < 60 {
+		// 短篇/OVA/特典：合集里偶尔混进这类条目（如《为美好的世界献上祝福 BONUS STAGE》），
+		// 时长筛选放在最前，因为这类条目的标题常常与合集/本地作品对不上。
+		return "短篇/特典（时长不足 60 分钟）"
+	}
 	earliest, latest, maxRuntime := "", "", 0
 	for _, lp := range localParts {
 		rel := strings.TrimSpace(lp.ReleaseDate)
