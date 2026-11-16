@@ -30,6 +30,7 @@ const scanning = ref(false);
 const report = ref<MediaAuditReport | null>(null);
 const onlyBad = ref(true);
 const unit = ref<"show" | "season">("show");
+const checkSeasons = ref(true);
 const checkEpisodes = ref(true);
 const checkFranchise = ref(true);
 
@@ -69,6 +70,7 @@ async function startAudit() {
       root_id: rootId.value,
       root_name: rootName.value,
       unit: unit.value,
+      check_seasons: checkSeasons.value,
       check_episodes: checkEpisodes.value,
       check_franchise: checkFranchise.value,
     });
@@ -287,9 +289,13 @@ onMounted(() => {
           <option value="season">按目录</option>
         </select>
       </label>
-      <label class="audit-unit" title="按 TMDB 季集表比对：缺哪一集、哪一季整季没收录（约 1 分钟）">
+      <label class="audit-unit" title="TMDB 已播出、本地整季都没有的季（如第 3 季在播而本地只有两季）；每部剧只多 1 次请求">
+        <input v-model="checkSeasons" type="checkbox" />
+        查缺季
+      </label>
+      <label class="audit-unit" title="按 TMDB 季集表比对：某季缺了哪几集；每季多 1 次请求，较慢">
         <input v-model="checkEpisodes" type="checkbox" />
-        查剧集缺失
+        查缺集
       </label>
       <label class="audit-unit" title="按 TMDB 合集比对：这一系列还有哪部没收录">
         <input v-model="checkFranchise" type="checkbox" />

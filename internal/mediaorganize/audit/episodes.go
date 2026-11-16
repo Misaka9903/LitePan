@@ -110,24 +110,7 @@ func ParseEpisode(name string, seasonFallback int) (EpisodeKey, bool) {
 // local 是「季号 → 本地集号列表」，today 用于判断已播出。
 func CompareShow(local map[int][]int, tmdb []TMDBSeason, today time.Time) ShowDiff {
 	todayStr := today.Format("2006-01-02")
-	aired := make(map[int]TMDBSeason, len(tmdb))
-	for _, s := range tmdb {
-		if s.Number <= 0 {
-			continue
-		}
-		if s.EpisodeCount <= 0 && len(s.Episodes) == 0 {
-			continue
-		}
-		if len(s.Episodes) > 0 {
-			// 以集列表为准：整季一集都没播（新番刚公布）就不算已播出季。
-			if !hasAiredEpisode(s.Episodes, todayStr) {
-				continue
-			}
-		} else if strings.TrimSpace(s.AirDate) == "" || s.AirDate > todayStr {
-			continue // 未播出/未定档的季
-		}
-		aired[s.Number] = s
-	}
+	aired := airedSeasons(tmdb, todayStr)
 
 	localNums := make([]int, 0, len(local))
 	for n := range local {
@@ -172,6 +155,56 @@ func CompareShow(local map[int][]int, tmdb []TMDBSeason, today time.Time) ShowDi
 		}
 	}
 	return out
+}
+
+// CompareSeasons 只比对「哪一季整季没收录」，不看集号。
+//
+// 用于「只查缺季」模式：只需要剧的季列表，不需要逐季拉集详情，请求量小。
+func CompareSeasons(local map[int][]int, tmdb []TMDBSeason, today time.Time) ShowDiff {
+	aired := airedSeasons(tmdb, today.Format("2006-01-02"))
+	out := ShowDiff{}
+	for n := range local {
+		if n > 0 {
+			out.LocalSeasons = append(out.LocalSeasons, n)
+			if n > out.LatestSeason {
+				out.LatestSeason = n
+			}
+		}
+	}
+	sort.Ints(out.LocalSeasons)
+	for _, n := range sortedSeasonNumbers(aired) {
+		if _, ok := local[n]; ok {
+			continue
+		}
+		out.MissingSeasons = append(out.MissingSeasons, n)
+		if n > out.LatestSeason {
+			out.LatestSeason = n
+		}
+	}
+	return out
+}
+
+// airedSeasons 过滤出「已经播出」的季：有集列表时以集列表为准，
+// 否则看季的 air_date。未播出/未定档的季不参与缺失判定。
+func airedSeasons(tmdb []TMDBSeason, todayStr string) map[int]TMDBSeason {
+	aired := make(map[int]TMDBSeason, len(tmdb))
+	for _, s := range tmdb {
+		if s.Number <= 0 {
+			continue
+		}
+		if s.EpisodeCount <= 0 && len(s.Episodes) == 0 {
+			continue
+		}
+		if len(s.Episodes) > 0 {
+			if !hasAiredEpisode(s.Episodes, todayStr) {
+				continue
+			}
+		} else if strings.TrimSpace(s.AirDate) == "" || s.AirDate > todayStr {
+			continue
+		}
+		aired[s.Number] = s
+	}
+	return aired
 }
 
 func compareSeason(number int, localEps []int, s TMDBSeason, todayStr string) SeasonDiff {

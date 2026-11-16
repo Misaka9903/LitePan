@@ -361,6 +361,7 @@ export interface MediaAuditRequest {
   unit?: "show" | "season";
   exts?: string;
   /** 不传时后端按开启处理 */
+  check_seasons?: boolean;
   check_episodes?: boolean;
   check_franchise?: boolean;
 }
@@ -372,6 +373,7 @@ export interface MediaAuditReportRequest {
   required: string[];
   unit: string;
   exts?: string;
+  check_seasons?: boolean;
   check_episodes?: boolean;
   check_franchise?: boolean;
 }

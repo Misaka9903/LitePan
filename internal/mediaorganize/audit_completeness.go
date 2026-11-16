@@ -167,13 +167,23 @@ func parseMovieInfo(m map[string]any) movieInfo {
 	return out
 }
 
+// completenessOptions 是完整性比对的开关：缺季、缺集、电影续集各自独立。
+type completenessOptions struct {
+	Seasons   bool
+	Episodes  bool
+	Franchise bool
+}
+
+// any 表示至少开启了一项。
+func (o completenessOptions) any() bool { return o.Seasons || o.Episodes || o.Franchise }
+
 // applyCompleteness 给报告里的每个分组补上 TMDB 比对结论。
 //
 // 只处理带 {tmdb-xxx} 标签的作品目录（用户库里都是整理过的，标签齐全）；
 // 未匹配/查询失败只做标记，不影响其它分组。
 func (s *Service) applyCompleteness(ctx context.Context, rep *audit.Report, client auditTMDBClient, interval time.Duration,
-	checkEpisodes, checkFranchise bool, today time.Time) int {
-	if rep == nil || client == nil || (!checkEpisodes && !checkFranchise) {
+	opts completenessOptions, today time.Time) int {
+	if rep == nil || client == nil || !opts.any() {
 		return 0
 	}
 	f := &tmdbFetcher{ctx: ctx, client: client, svc: s, interval: interval}
@@ -199,9 +209,7 @@ func (s *Service) applyCompleteness(ctx context.Context, rep *audit.Report, clie
 			if tv, err := f.lookup(g.TMDBID, "tv"); err == nil && tv != nil {
 				g.MediaType = "tv"
 				g.Match = "matched"
-				if checkEpisodes {
-					s.fillShowDiff(f, g, tv, today)
-				}
+				s.fillShowDiff(f, g, tv, today, opts)
 				continue
 			}
 		}
@@ -211,9 +219,7 @@ func (s *Service) applyCompleteness(ctx context.Context, rep *audit.Report, clie
 			if tv, terr := f.lookup(g.TMDBID, "tv"); terr == nil && tv != nil {
 				g.MediaType = "tv"
 				g.Match = "matched"
-				if checkEpisodes {
-					s.fillShowDiff(f, g, tv, today)
-				}
+				s.fillShowDiff(f, g, tv, today, opts)
 				continue
 			}
 		}
@@ -239,16 +245,28 @@ func (s *Service) applyCompleteness(ctx context.Context, rep *audit.Report, clie
 		}
 	}
 
-	if checkFranchise && movieGroups > 0 && len(byCollection) > 0 {
+	if opts.Franchise && movieGroups > 0 && len(byCollection) > 0 {
 		s.fillFranchises(f, rep, byCollection, localMovies, today)
 	}
 	return f.calls
 }
 
-// fillShowDiff 拉取该剧各本地季的集列表并比对。
-func (s *Service) fillShowDiff(f *tmdbFetcher, g *audit.Group, detail map[string]any, today time.Time) {
+// fillShowDiff 比对剧集的季与集。
+//
+// 只查缺季时不必逐季拉集详情：一次剧详情里的 seasons 就够判断「哪一季整季没有」。
+func (s *Service) fillShowDiff(f *tmdbFetcher, g *audit.Group, detail map[string]any, today time.Time, opts completenessOptions) {
+	if !opts.Seasons && !opts.Episodes {
+		return
+	}
 	seasons := parseTMDBSeasons(detail)
-	if len(seasons) == 0 || len(g.Episodes) == 0 {
+	if len(seasons) == 0 {
+		return
+	}
+	if !opts.Episodes || len(g.Episodes) == 0 {
+		if opts.Seasons {
+			diff := audit.CompareSeasons(g.Episodes, seasons, today)
+			g.Completeness = &diff
+		}
 		return
 	}
 	byNumber := make(map[int]*audit.TMDBSeason, len(seasons))
@@ -277,6 +295,11 @@ func (s *Service) fillShowDiff(f *tmdbFetcher, g *audit.Group, detail map[string
 		*base = *detailSeason
 	}
 	diff := audit.CompareShow(g.Episodes, seasons, today)
+	if !opts.Seasons {
+		// 只查缺集：季级差异不报。
+		diff.MissingSeasons = nil
+		diff.ExtraSeasons = nil
+	}
 	g.Completeness = &diff
 }
 

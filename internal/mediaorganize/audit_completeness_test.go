@@ -90,7 +90,7 @@ func TestApplyCompletenessFindsMissingEpisodes(t *testing.T) {
 		seasons: map[string]map[int][]map[string]any{"100": {1: episodeList(1, 2, 3, 4)}},
 	}
 	svc := &Service{}
-	if calls := svc.applyCompleteness(context.Background(), &rep, client, 0, true, true, time.Now()); calls == 0 {
+	if calls := svc.applyCompleteness(context.Background(), &rep, client, 0, completenessOptions{Seasons: true, Episodes: true, Franchise: true}, time.Now()); calls == 0 {
 		t.Fatal("应发起 TMDB 请求")
 	}
 
@@ -125,7 +125,7 @@ func TestApplyCompletenessFindsMissingSeason(t *testing.T) {
 		seasons: map[string]map[int][]map[string]any{"200": {1: episodeList(1)}},
 	}
 	svc := &Service{}
-	svc.applyCompleteness(context.Background(), &rep, client, 0, true, true, time.Now())
+	svc.applyCompleteness(context.Background(), &rep, client, 0, completenessOptions{Seasons: true, Episodes: true, Franchise: true}, time.Now())
 
 	g := rep.Groups[0]
 	if g.Completeness == nil || len(g.Completeness.MissingSeasons) != 1 || g.Completeness.MissingSeasons[0] != 2 {
@@ -155,7 +155,7 @@ func TestApplyCompletenessFranchise(t *testing.T) {
 		},
 	}
 	svc := &Service{}
-	svc.applyCompleteness(context.Background(), &rep, client, 0, true, true, time.Now())
+	svc.applyCompleteness(context.Background(), &rep, client, 0, completenessOptions{Seasons: true, Episodes: true, Franchise: true}, time.Now())
 
 	g := rep.Groups[0]
 	if g.MediaType != "movie" || g.Franchise == nil {
@@ -175,7 +175,7 @@ func TestApplyCompletenessMarksUnmatched(t *testing.T) {
 		),
 	))
 	svc := &Service{}
-	svc.applyCompleteness(context.Background(), &rep, &stubAuditTMDB{}, 0, true, true, time.Now())
+	svc.applyCompleteness(context.Background(), &rep, &stubAuditTMDB{}, 0, completenessOptions{Seasons: true, Episodes: true, Franchise: true}, time.Now())
 	if rep.Groups[0].Match != "unmatched" {
 		t.Fatalf("未匹配标记 = %q", rep.Groups[0].Match)
 	}
@@ -192,12 +192,12 @@ func TestApplyCompletenessCachesTMDB(t *testing.T) {
 		seasons: map[string]map[int][]map[string]any{"100": {1: episodeList(1)}},
 	}
 	svc := &Service{}
-	first := svc.applyCompleteness(context.Background(), &rep, client, 0, true, true, time.Now())
+	first := svc.applyCompleteness(context.Background(), &rep, client, 0, completenessOptions{Seasons: true, Episodes: true, Franchise: true}, time.Now())
 	if first == 0 {
 		t.Fatal("首次应发起请求")
 	}
 	before := client.calls
-	second := svc.applyCompleteness(context.Background(), &rep, client, 0, true, true, time.Now())
+	second := svc.applyCompleteness(context.Background(), &rep, client, 0, completenessOptions{Seasons: true, Episodes: true, Franchise: true}, time.Now())
 	if second != 0 || client.calls != before {
 		t.Fatalf("第二次应命中缓存：calls=%d→%d, second=%d", before, client.calls, second)
 	}
@@ -213,7 +213,7 @@ func TestApplyCompletenessSkipsWhenDisabled(t *testing.T) {
 		),
 	))
 	client := &stubAuditTMDB{}
-	if calls := (&Service{}).applyCompleteness(context.Background(), &rep, client, 0, false, false, time.Now()); calls != 0 || client.calls != 0 {
+	if calls := (&Service{}).applyCompleteness(context.Background(), &rep, client, 0, completenessOptions{}, time.Now()); calls != 0 || client.calls != 0 {
 		t.Fatalf("关闭时不该请求：calls=%d", client.calls)
 	}
 }
@@ -245,7 +245,7 @@ func TestApplyCompletenessMovieWithCollidingTVID(t *testing.T) {
 		movie: map[string]map[string]any{"4513": {"id": 4513, "title": "三十极夜",
 			"release_date": "2007-10-17", "runtime": 113}},
 	}
-	(&Service{}).applyCompleteness(context.Background(), &rep, client, 0, true, true, time.Now())
+	(&Service{}).applyCompleteness(context.Background(), &rep, client, 0, completenessOptions{Seasons: true, Episodes: true, Franchise: true}, time.Now())
 
 	g := rep.Groups[0]
 	if g.MediaType != "movie" {
@@ -270,8 +270,46 @@ func TestApplyCompletenessMovieWithNumberInName(t *testing.T) {
 		seasons: map[string]map[int][]map[string]any{"393": {1: episodeList(1, 2, 3)}},
 		movie:   map[string]map[string]any{"393": {"id": 393, "title": "杀死比尔2", "release_date": "2004-04-16", "runtime": 137}},
 	}
-	(&Service{}).applyCompleteness(context.Background(), &rep, client, 0, true, true, time.Now())
+	(&Service{}).applyCompleteness(context.Background(), &rep, client, 0, completenessOptions{Seasons: true, Episodes: true, Franchise: true}, time.Now())
 	if g := rep.Groups[0]; g.MediaType != "movie" || g.Completeness != nil {
 		t.Fatalf("应按电影处理: type=%q completeness=%+v", g.MediaType, g.Completeness)
+	}
+}
+
+// 只查缺季：不拉季详情，也能报「第三季整季没收录」。
+func TestApplyCompletenessSeasonsOnly(t *testing.T) {
+	rep := auditRunTree(t, dirNode("动漫", "root",
+		dirNode("只有两季的剧 (2021) {tmdb-300}", "g1",
+			dirNode("Season 1", "s1", fileNode("剧 (2021) S01E01 [1080p].mkv")),
+			dirNode("Season 2", "s2", fileNode("剧 (2021) S02E01 [1080p].mkv")),
+		),
+	))
+	client := &stubAuditTMDB{
+		tv: map[string]map[string]any{
+			"300": {"id": 300, "seasons": []any{
+				map[string]any{"season_number": 1, "episode_count": 12, "air_date": "2021-01-01"},
+				map[string]any{"season_number": 2, "episode_count": 12, "air_date": "2023-01-01"},
+				map[string]any{"season_number": 3, "episode_count": 12, "air_date": "2026-09-01"},
+				map[string]any{"season_number": 4, "episode_count": 12, "air_date": "2028-01-01"}, // 未播出
+			}},
+		},
+		seasons: map[string]map[int][]map[string]any{"300": {1: episodeList(1), 2: episodeList(1)}},
+	}
+	svc := &Service{}
+	svc.applyCompleteness(context.Background(), &rep, client, 0, completenessOptions{Seasons: true}, time.Now())
+
+	g := rep.Groups[0]
+	if g.Completeness == nil {
+		t.Fatal("缺季结论缺失")
+	}
+	if want := []int{3}; len(g.Completeness.MissingSeasons) != 1 || g.Completeness.MissingSeasons[0] != 3 {
+		t.Fatalf("缺失季 = %v, 期望 %v", g.Completeness.MissingSeasons, want)
+	}
+	if len(g.Completeness.Seasons) != 0 {
+		t.Fatalf("只查缺季时不该有逐季集号结论: %+v", g.Completeness.Seasons)
+	}
+	// 3 次调用：1 次剧详情 + 0 次季详情（stub 里 seasons 命中也不该被拉）
+	if client.calls != 1 {
+		t.Fatalf("TMDB 调用 = %d, 期望 1（只查剧详情）", client.calls)
 	}
 }

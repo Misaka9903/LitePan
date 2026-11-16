@@ -535,6 +535,7 @@ type mediaOrganizeAuditDTO struct {
 	Unit      string   `json:"unit"`
 	Exts      string   `json:"exts"`
 	// 不传时按开启处理。
+	CheckSeasons   *bool `json:"check_seasons,omitempty"`
 	CheckEpisodes  *bool `json:"check_episodes,omitempty"`
 	CheckFranchise *bool `json:"check_franchise,omitempty"`
 }
@@ -555,6 +556,7 @@ func (h *Handler) runMediaOrganizeAudit(w http.ResponseWriter, r *http.Request) 
 		Required:       in.Required,
 		Unit:           in.Unit,
 		Exts:           in.Exts,
+		CheckSeasons:   in.CheckSeasons,
 		CheckEpisodes:  in.CheckEpisodes,
 		CheckFranchise: in.CheckFranchise,
 	})
