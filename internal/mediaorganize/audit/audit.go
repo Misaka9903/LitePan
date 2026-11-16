@@ -54,8 +54,12 @@ type Bucket struct {
 	Sample  string
 	Files   int
 	Bytes   int64
-	// Missing 该桶中每个文件都缺的标签键（保守判定：只要有一个文件带就不算缺）。
+	// Missing 该桶里有文件缺的标签键（缺一集也算，特典不参与）。
 	Missing []string
+	// Total 参与标签判定的文件数（已排除特典）。
+	Total int
+	// MissingFiles 每个缺失项缺了多少个文件，键与 Missing 一致。
+	MissingFiles map[string]int
 	// Mixed 桶内文件签名不一致（例如混了 2160p 与 1080p）。
 	Mixed bool
 	// MixedExt 该目录里存在其它媒体扩展名（例如一季里混了 mkv 与 mp4）。
@@ -71,7 +75,10 @@ type Group struct {
 	Files   int
 	Bytes   int64
 	Missing []string
-	Mixed   bool
+	// MissingTotal 参与标签判定的总集数；MissingFiles 汇总各季每个缺失项缺的集数。
+	MissingTotal int
+	MissingFiles map[string]int
+	Mixed        bool
 	// MixedExt 组内任一季度目录存在扩展名不一致。
 	MixedExt bool
 	Buckets  []Bucket
@@ -167,6 +174,15 @@ func Run(root Node, opts Options) Report {
 				g.MixedExt = true
 			}
 			g.Missing = mergeKeys(g.Missing, b.Missing)
+			g.MissingTotal += b.Total
+			if len(b.MissingFiles) > 0 {
+				if g.MissingFiles == nil {
+					g.MissingFiles = map[string]int{}
+				}
+				for k, n := range b.MissingFiles {
+					g.MissingFiles[k] += n
+				}
+			}
 		}
 		if opts.CollectEpisodes && len(buckets) > 0 {
 			key, _, _ := groupKey(unit, path, root.Name, rootTagged)
@@ -288,18 +304,42 @@ func judgeDir(path, dirID string, files []Node, required []string, exts map[stri
 		for _, f := range group {
 			b.Bytes += f.Size
 		}
-		sigs := map[string]struct{}{}
+
+		// 特典（SP/OVA/特典/花絮/NCOP…）不参与标签判定：
+		// 它们本来就不带分辨率/编码，参与进来只会制造噪声。
+		scored := make([]Node, 0, len(group))
 		for _, f := range group {
-			tags := parseTags(f.Name)
+			if rules.ExtractSpecialLabel(f.Name) != "" {
+				continue
+			}
+			scored = append(scored, f)
+		}
+		b.Total = len(scored)
+
+		tagMaps := make([]map[string]any, len(scored))
+		for i, f := range scored {
+			tagMaps[i] = parseTags(f.Name)
+		}
+		sigs := map[string]struct{}{}
+		for _, tags := range tagMaps {
 			sigs[signature(tags, required)] = struct{}{}
-			for _, k := range required {
+		}
+		for _, k := range required {
+			miss := 0
+			for _, tags := range tagMaps {
 				if !hasTag(tags, k) {
-					// 该文件缺这一项；只有全桶都缺才记入 Missing
-					if !containsKey(b.Missing, k) && allMissing(group, k) {
-						b.Missing = append(b.Missing, k)
-					}
+					miss++
 				}
 			}
+			if miss == 0 {
+				continue
+			}
+			// 缺一集就记：整理是逐文件拼标签的，个别集缺会直接体现成同一季命名不一致。
+			b.Missing = append(b.Missing, k)
+			if b.MissingFiles == nil {
+				b.MissingFiles = map[string]int{}
+			}
+			b.MissingFiles[k] = miss
 		}
 		b.Mixed = len(sigs) > 1
 		if len(b.Missing) > 0 {
@@ -308,16 +348,6 @@ func judgeDir(path, dirID string, files []Node, required []string, exts map[stri
 		out = append(out, b)
 	}
 	return out, mixedExt
-}
-
-// allMissing 判断整个桶是否都缺某个标签。
-func allMissing(files []Node, key string) bool {
-	for _, f := range files {
-		if hasTag(parseTags(f.Name), key) {
-			return false
-		}
-	}
-	return true
 }
 
 func parseTags(name string) map[string]any {
@@ -454,7 +484,7 @@ func containsKey(list []string, k string) bool {
 // WriteCSV 把报告写成 CSV，一行一个桶。
 func (r Report) WriteCSV(w io.Writer) error {
 	cw := csv.NewWriter(w)
-	header := []string{"分组", "分组路径", "所在目录", "扩展名", "样本文件", "文件数", "体积", "缺失", "混合", "扩展名不一致",
+	header := []string{"分组", "分组路径", "所在目录", "扩展名", "样本文件", "文件数", "体积", "缺失", "缺失集数", "混合", "扩展名不一致",
 		"TMDB", "匹配", "缺失季", "缺失集", "多余集", "缺续集"}
 	if err := cw.Write(header); err != nil {
 		return err
@@ -470,6 +500,7 @@ func (r Report) WriteCSV(w io.Writer) error {
 				fmt.Sprint(b.Files),
 				fmt.Sprint(b.Bytes),
 				strings.Join(b.Missing, "+"),
+				missingDetailText(b),
 				boolText(b.Mixed),
 				boolText(b.MixedExt),
 				tmdbText(g),
@@ -506,6 +537,22 @@ func seasonFromDirPath(dirPath string) (int, bool) {
 		return 0, false
 	}
 	return *n, true
+}
+
+// missingDetailText 输出「分辨率 8/24」这类明细，整数不算缺集数时只写项名。
+func missingDetailText(b Bucket) string {
+	if len(b.Missing) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(b.Missing))
+	for _, k := range b.Missing {
+		if n := b.MissingFiles[k]; n > 0 && b.Total > 0 {
+			parts = append(parts, fmt.Sprintf("%s %d/%d", k, n, b.Total))
+			continue
+		}
+		parts = append(parts, k)
+	}
+	return strings.Join(parts, "+")
 }
 
 func tmdbText(g Group) string {

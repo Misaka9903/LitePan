@@ -84,7 +84,10 @@ type AuditSeason struct {
 	Files   int      `json:"files"`
 	Bytes   int64    `json:"bytes"`
 	Missing []string `json:"missing"`
-	Mixed   bool     `json:"mixed"`
+	// Total 参与标签判定的集数（特典已排除）；MissingFiles 每项缺了多少集。
+	Total        int            `json:"total"`
+	MissingFiles map[string]int `json:"missing_files,omitempty"`
+	Mixed        bool           `json:"mixed"`
 }
 
 // AuditSeasonStatus 是一季的季集比对结果。
@@ -131,16 +134,19 @@ type AuditFranchise struct {
 
 // AuditGroup 是一部剧（Unit=show）或一季（Unit=season）。
 type AuditGroup struct {
-	ID       string        `json:"id"`
-	Name     string        `json:"name"`
-	Path     string        `json:"path"`
-	OK       bool          `json:"ok"`
-	Files    int           `json:"files"`
-	Bytes    int64         `json:"bytes"`
-	Missing  []string      `json:"missing"`
-	Mixed    bool          `json:"mixed"`
-	MixedExt bool          `json:"mixed_ext"`
-	Seasons  []AuditSeason `json:"seasons"`
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Path    string   `json:"path"`
+	OK      bool     `json:"ok"`
+	Files   int      `json:"files"`
+	Bytes   int64    `json:"bytes"`
+	Missing []string `json:"missing"`
+	// MissingTotal 参与判定的总集数；MissingFiles 每项缺了多少集。
+	MissingTotal int            `json:"missing_total"`
+	MissingFiles map[string]int `json:"missing_files,omitempty"`
+	Mixed        bool           `json:"mixed"`
+	MixedExt     bool           `json:"mixed_ext"`
+	Seasons      []AuditSeason  `json:"seasons"`
 
 	// 以下由 TMDB 完整性比对填充。
 	TMDBID       string             `json:"tmdb_id,omitempty"`
@@ -378,15 +384,17 @@ func toAuditGroup(g audit.Group) AuditGroup {
 		missing = []string{}
 	}
 	out := AuditGroup{
-		ID:       g.ID,
-		Name:     g.Name,
-		Path:     g.Path,
-		OK:       g.OK(),
-		Files:    g.Files,
-		Bytes:    g.Bytes,
-		Missing:  missing,
-		Mixed:    g.Mixed,
-		MixedExt: g.MixedExt,
+		ID:           g.ID,
+		Name:         g.Name,
+		Path:         g.Path,
+		OK:           g.OK(),
+		Files:        g.Files,
+		Bytes:        g.Bytes,
+		Missing:      missing,
+		MissingTotal: g.MissingTotal,
+		MissingFiles: g.MissingFiles,
+		Mixed:        g.Mixed,
+		MixedExt:     g.MixedExt,
 	}
 	for _, b := range g.Buckets {
 		seasonMissing := b.Missing
@@ -394,14 +402,16 @@ func toAuditGroup(g audit.Group) AuditGroup {
 			seasonMissing = []string{}
 		}
 		out.Seasons = append(out.Seasons, AuditSeason{
-			DirID:   b.DirID,
-			DirPath: b.DirPath,
-			Ext:     b.Ext,
-			Sample:  b.Sample,
-			Files:   b.Files,
-			Bytes:   b.Bytes,
-			Missing: seasonMissing,
-			Mixed:   b.Mixed,
+			DirID:        b.DirID,
+			DirPath:      b.DirPath,
+			Ext:          b.Ext,
+			Sample:       b.Sample,
+			Files:        b.Files,
+			Bytes:        b.Bytes,
+			Missing:      seasonMissing,
+			Total:        b.Total,
+			MissingFiles: b.MissingFiles,
+			Mixed:        b.Mixed,
 		})
 	}
 	if out.Seasons == nil {

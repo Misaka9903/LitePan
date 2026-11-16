@@ -254,3 +254,69 @@ func TestRunUniformExtensionNotFlagged(t *testing.T) {
 		t.Fatalf("单一扩展名不该被判混用")
 	}
 }
+
+// 缺一集就记：12 集里 1 集没有分辨率，也要报出来（整理是逐文件拼标签的）。
+func TestRunPartialMissingCounted(t *testing.T) {
+	root := dir("韩剧", "root",
+		dir("部分缺 (2024) {tmdb-1}", "p",
+			dir("Season 01", "p1",
+				file("剧 (2024) S01E01 [2160p H.265 AAC].mkv", 10),
+				file("剧 (2024) S01E02 [2160p H.265 AAC].mkv", 10),
+				file("剧 (2024) S01E03 [H.265 AAC].mkv", 10),
+			),
+		),
+	)
+	rep := Run(root, Options{Required: []string{"screen_size", "video_codec", "audio_codec"}})
+	g := find(t, rep, "部分缺 (2024) {tmdb-1}")
+	if strings.Join(g.Missing, ",") != "screen_size" {
+		t.Fatalf("缺项 = %v, 期望 screen_size", g.Missing)
+	}
+	if g.MissingFiles["screen_size"] != 1 || g.MissingTotal != 3 {
+		t.Fatalf("缺失集数 = %v / 总 %d, 期望 1 / 3", g.MissingFiles, g.MissingTotal)
+	}
+	if rep.BadGroups != 1 {
+		t.Fatalf("不合格分组 = %d, 期望 1", rep.BadGroups)
+	}
+}
+
+// 特典（NCOP/SP/OVA）不带分辨率编码，不参与标签判定。
+func TestRunSpecialsExcludedFromTags(t *testing.T) {
+	root := dir("动漫", "root",
+		dir("番剧 (2020) {tmdb-2}", "a",
+			dir("Season 01", "a1",
+				file("番剧 (2020) S01E01 [1080p H.264 AAC].mkv", 10),
+				file("番剧 (2020) S01E02 [1080p H.264 AAC].mkv", 10),
+				file("番剧 (2020) NCOP01.mkv", 10),
+				file("番剧 (2020) SP01 特典.mkv", 10),
+			),
+		),
+	)
+	rep := Run(root, Options{Required: []string{"screen_size", "video_codec", "audio_codec"}})
+	g := find(t, rep, "番剧 (2020) {tmdb-2}")
+	if len(g.Missing) != 0 {
+		t.Fatalf("特典不该让整季被判缺: %v", g.Missing)
+	}
+	if g.MissingTotal != 2 {
+		t.Fatalf("参与判定的集数 = %d, 期望 2（特典已排除）", g.MissingTotal)
+	}
+	if rep.BadGroups != 0 {
+		t.Fatalf("不合格分组 = %d, 期望 0", rep.BadGroups)
+	}
+}
+
+// 整季都缺时集数 = 总集数，前端据此显示「整季缺」而不是「x/y」。
+func TestRunAllMissingCountsAsTotal(t *testing.T) {
+	root := dir("韩剧", "root",
+		dir("整季缺 (2023) {tmdb-3}", "m",
+			dir("Season 01", "m1",
+				file("剧 (2023) S01E01 [H.265].mkv", 10),
+				file("剧 (2023) S01E02 [H.265].mkv", 10),
+			),
+		),
+	)
+	rep := Run(root, Options{Required: []string{"screen_size", "video_codec", "audio_codec"}})
+	g := find(t, rep, "整季缺 (2023) {tmdb-3}")
+	if g.MissingFiles["screen_size"] != 2 || g.MissingTotal != 2 {
+		t.Fatalf("整季缺集数 = %d / 总 %d, 期望 2 / 2", g.MissingFiles["screen_size"], g.MissingTotal)
+	}
+}

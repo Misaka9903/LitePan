@@ -322,6 +322,10 @@ export interface MediaAuditSeason {
   files: number;
   bytes: number;
   missing: string[];
+  /** 参与标签判定的集数（特典已排除） */
+  total?: number;
+  /** 每项缺了多少集 */
+  missing_files?: Record<string, number>;
   mixed: boolean;
 }
 
@@ -333,6 +337,9 @@ export interface MediaAuditGroup {
   files: number;
   bytes: number;
   missing: string[];
+  /** 参与标签判定的总集数；missing_files 每项缺了多少集 */
+  missing_total?: number;
+  missing_files?: Record<string, number>;
   mixed: boolean;
   /** 同季混用多种媒体扩展名（整理时会被 skip_mixed_ext 跳过） */
   mixed_ext?: boolean;

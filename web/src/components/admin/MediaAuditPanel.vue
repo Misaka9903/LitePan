@@ -54,10 +54,26 @@ function labelOf(key: string) {
 
 const requiredLabel = computed(() => requiredTags.value.map(labelOf).join(" · "));
 
+/** 某一项缺了几集（没数据时返回 0） */
+function missingFiles(group: MediaAuditGroup, key: string) {
+  return group.missing_files?.[key] ?? 0;
+}
+
+/** 部分缺：有集带、有集不带；整季都缺时文件数等于总集数 */
+function isPartialMissing(group: MediaAuditGroup, key: string) {
+  const miss = missingFiles(group, key);
+  return miss > 0 && miss < (group.missing_total ?? 0);
+}
+
 /** 每个缺失标签点上去能看到的解释 */
-function missingHint(key: string) {
+function missingHint(group: MediaAuditGroup, key: string) {
   const label = labelOf(key);
-  return `这一季里每个文件的文件名都解析不出${label}（只要有一个文件带就不算缺）`;
+  const miss = missingFiles(group, key);
+  const total = group.missing_total ?? 0;
+  if (miss > 0 && total > 0 && miss < total) {
+    return `${total} 集里有 ${miss} 集的文件名解析不出${label}，整理后这些集的名字会缺这一段`;
+  }
+  return `整季的文件名都解析不出${label}（整理后这一季都没有这一段）`;
 }
 
 function openPicker() {
@@ -335,8 +351,9 @@ onMounted(async () => {
       <summary>体检说明</summary>
       <ul>
         <li>
-          <b>媒体信息</b>：按「目录整理 → 媒体信息顺序」的必填项（当前：<b>{{ requiredLabel }}</b>）判定，
-          某个文件的文件名里解析不出该项就算缺；<b>一季里所有文件都缺</b>才记到「缺失」列。
+          <b>媒体信息</b>：按「目录整理 → 媒体信息顺序」的必填项（当前：<b>{{ requiredLabel }}</b>）判定。
+          <b>缺一集就记</b>到「缺失」列——整理是逐文件拼标签的，个别集缺会直接体现成同一季命名不一致；
+          徽标上的 <b>8/24</b> 表示 24 集里有 8 集缺。特典（SP / OVA / NCOP / 花絮）不参与判定。
         </li>
         <li>
           <b>扩展名一致性</b>：同一季混用多种媒体扩展名会标「扩展名混用」——整理时会被
@@ -438,8 +455,15 @@ onMounted(async () => {
             <td class="audit-table__season-col">{{ seasonCount(group) }}</td>
             <td class="audit-sample" :title="sampleOf(group)">{{ sampleOf(group) }}</td>
             <td class="audit-table__missing-col">
-              <span v-for="key in group.missing ?? []" :key="key" class="audit-badge" :title="missingHint(key)">
-                {{ labelOf(key) }}
+              <span
+                v-for="key in group.missing ?? []"
+                :key="key"
+                :class="['audit-badge', isPartialMissing(group, key) ? 'audit-badge--warn' : '']"
+                :title="missingHint(group, key)"
+              >
+                {{ labelOf(key)
+                }}<template v-if="isPartialMissing(group, key)">
+                  {{ missingFiles(group, key) }}/{{ group.missing_total }}</template>
               </span>
               <span
                 v-if="group.mixed_ext"
