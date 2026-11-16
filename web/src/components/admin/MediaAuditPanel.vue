@@ -198,10 +198,28 @@ function episodeList(eps: number[]) {
   return eps.map((e) => `E${pad2(e)}`).join("、");
 }
 
+/** 同一合集可能落在多个作品目录里，结论只在第一条上展开，其余显示「见同系列」 */
+function computeFranchiseFirst(list: MediaAuditGroup[]) {
+  const seen = new Set<string>();
+  const first = new Set<string>();
+  for (const g of list) {
+    const name = g.franchise?.name;
+    if (!name || seen.has(name)) {
+      continue;
+    }
+    seen.add(name);
+    first.add(g.id);
+  }
+  return first;
+}
+
 const rows = computed<MediaAuditGroup[]>(() => {
   const groups = (report.value?.groups ?? []).map(normalizeGroup);
   return onlyBad.value ? groups.filter(isBad) : groups;
 });
+
+/** 同一合集只在第一条作品上展开结论，其余行显示引用，避免重复刷屏 */
+const franchiseFirstIds = computed(() => computeFranchiseFirst(rows.value));
 
 const summary = computed(() => report.value?.summary);
 
@@ -522,7 +540,7 @@ onMounted(async () => {
                 >季集齐全</span>
                 <span v-if="group.completeness.unreliable" class="audit-badge audit-badge--warn">编号差异</span>
               </template>
-              <template v-else-if="group.franchise">
+              <template v-else-if="group.franchise && franchiseFirstIds.has(group.id)">
                 <span v-if="!group.franchise.missing.length" class="audit-ok" :title="`TMDB 合集共 ${group.franchise.parts} 部，本地收录 ${group.franchise.local.length} 部`">
                   已收录齐全<template v-if="group.franchise.optional.length || group.franchise.upcoming.length">
                     （{{ group.franchise.local.length }}/{{ group.franchise.parts }}）</template>
@@ -531,6 +549,9 @@ onMounted(async () => {
                 <span v-for="p in group.franchise.optional" :key="`opt-${p.id}`" class="audit-badge audit-badge--warn" :title="p.reason ?? ''">可选 {{ p.title }}</span>
                 <span v-if="group.franchise.upcoming.length" class="audit-ok">待上映 {{ group.franchise.upcoming.length }}</span>
               </template>
+              <span v-else-if="group.franchise" class="audit-ok" :title="'同一合集的结论合并显示在该系列的第一部作品上'">
+                同《{{ group.franchise.name }}》合集
+              </span>
               <span
                 v-else-if="group.match === 'unparsed'"
                 class="audit-badge audit-badge--warn"
