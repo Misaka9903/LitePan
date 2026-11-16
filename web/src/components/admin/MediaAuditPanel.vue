@@ -523,7 +523,10 @@ onMounted(async () => {
                 <span v-if="group.completeness.unreliable" class="audit-badge audit-badge--warn">编号差异</span>
               </template>
               <template v-else-if="group.franchise">
-                <span v-if="!group.franchise.missing.length" class="audit-ok">合集齐 {{ group.franchise.local.length }}/{{ group.franchise.parts }}</span>
+                <span v-if="!group.franchise.missing.length" class="audit-ok" :title="`TMDB 合集共 ${group.franchise.parts} 部，本地收录 ${group.franchise.local.length} 部`">
+                  已收录齐全<template v-if="group.franchise.optional.length || group.franchise.upcoming.length">
+                    （{{ group.franchise.local.length }}/{{ group.franchise.parts }}）</template>
+                </span>
                 <span v-else class="audit-badge">缺 {{ group.franchise.missing.map((p) => p.title).join('、') }}</span>
                 <span v-for="p in group.franchise.optional" :key="`opt-${p.id}`" class="audit-badge audit-badge--warn" :title="p.reason ?? ''">可选 {{ p.title }}</span>
                 <span v-if="group.franchise.upcoming.length" class="audit-ok">待上映 {{ group.franchise.upcoming.length }}</span>
