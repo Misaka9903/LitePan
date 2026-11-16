@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { storeToRefs } from "pinia";
 import { getApiErrorMessage } from "@/api/client";
 import type { MediaAuditGroup, MediaAuditMoveResult, MediaAuditReport } from "@/api/mediaOrganize";
 import {
+  fetchMediaOrganizeAudit,
+  fetchMediaOrganizeAuditJob,
   fetchMediaOrganizeSettings,
   moveMediaOrganizeAudit,
   runMediaOrganizeAudit,
+  startMediaOrganizeAudit,
 } from "@/api/mediaOrganize";
 import { useAccountsStore } from "@/stores/accounts";
 import AppButton from "@/components/base/AppButton.vue";
@@ -31,6 +34,9 @@ const rootId = ref("");
 const rootName = ref("");
 const accountId = ref<number>(0);
 const scanning = ref(false);
+const jobLogs = ref<Array<{ time: string; message: string }>>([]);
+const logBox = ref<HTMLElement | null>(null);
+let pollTimer: number | null = null;
 const report = ref<MediaAuditReport | null>(null);
 const onlyBad = ref(true);
 const unit = ref<"show" | "season">("show");
@@ -104,32 +110,83 @@ function onFolderPicked(payload: { accountId: number; parentId: string; path: st
   report.value = null;
 }
 
+const payload = computed(() => ({
+  account_id: accountId.value,
+  root_id: rootId.value,
+  root_name: rootName.value,
+  unit: unit.value,
+  check_seasons: checkSeasons.value,
+  check_episodes: checkEpisodes.value,
+  check_franchise: checkFranchise.value,
+}));
+
+function stopPolling() {
+  if (pollTimer !== null) {
+    window.clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+async function applyReport(data: Awaited<ReturnType<typeof runMediaOrganizeAudit>>) {
+  report.value = data;
+  if (data.summary.bad_groups === 0) {
+    toast.success(`体检完成：${data.summary.total_groups} 部全部齐全`);
+  } else {
+    toast.success(`体检完成：${data.summary.bad_groups} 部信息不全`);
+  }
+}
+
+/** 异步体检：轮询进度日志，完成后取报告 */
 async function startAudit() {
   if (!rootId.value) {
     toast.error("请先选择要体检的目录");
     return;
   }
   scanning.value = true;
+  jobLogs.value = [];
+  report.value = null;
   try {
-    const data = await runMediaOrganizeAudit({
-      account_id: accountId.value,
-      root_id: rootId.value,
-      root_name: rootName.value,
-      unit: unit.value,
-      check_seasons: checkSeasons.value,
-      check_episodes: checkEpisodes.value,
-      check_franchise: checkFranchise.value,
-    });
-    report.value = data;
-    if (data.summary.bad_groups === 0) {
-      toast.success(`体检完成：${data.summary.total_groups} 部全部齐全`);
-    } else {
-      toast.success(`体检完成：${data.summary.bad_groups} 部信息不全`);
-    }
+    const started = await startMediaOrganizeAudit(payload.value);
+    const jobId = started.job_id;
+    const tick = async () => {
+      try {
+        const job = await fetchMediaOrganizeAuditJob(jobId);
+        jobLogs.value = job.logs ?? [];
+        nextTick(() => {
+          if (logBox.value) {
+            logBox.value.scrollTop = logBox.value.scrollHeight;
+          }
+        });
+        if (!job.done) {
+          return;
+        }
+        stopPolling();
+        if (job.failed) {
+          toast.error(job.error || "体检失败");
+          scanning.value = false;
+          return;
+        }
+        if (job.report_id) {
+          await applyReport(await fetchMediaOrganizeAudit(job.report_id));
+        }
+        scanning.value = false;
+      } catch (error) {
+        stopPolling();
+        scanning.value = false;
+        toast.error(getApiErrorMessage(error, "获取体检进度失败"));
+      }
+    };
+    pollTimer = window.setInterval(() => void tick(), 1000);
+    await tick();
   } catch (error) {
-    toast.error(getApiErrorMessage(error, "体检失败"));
-  } finally {
-    scanning.value = false;
+    // 老版本后端没有异步接口时退回同步调用
+    try {
+      await applyReport(await runMediaOrganizeAudit(payload.value));
+    } catch (fallbackError) {
+      toast.error(getApiErrorMessage(fallbackError, "体检失败"));
+    } finally {
+      scanning.value = false;
+    }
   }
 }
 
@@ -179,6 +236,10 @@ function airingSeasons(group: MediaAuditGroup) {
 
 function isBad(group: MediaAuditGroup) {
   if (!group.ok) {
+    return true;
+  }
+  if (group.match === "unmatched" || group.match === "failed" || group.match === "unparsed") {
+    // 匹配不上/解析不出季集也属于「需要你看一眼」，勾选只看不合格时一并显示
     return true;
   }
   if ((group.completeness?.missing_seasons?.length ?? 0) > 0) {
@@ -288,7 +349,14 @@ function exportCsv() {
   for (const g of data.groups) {
     const group = normalizeGroup(g);
     const missSeasons = (group.completeness?.missing_seasons ?? []).map((n) => `S${pad2(n)}`).join("+");
-    const missEpisodes = missingEpisodes(group)
+    const absoluteText = group.completeness?.absolute
+      ? group.completeness.absolute.missing.length
+        ? `编号差异:本地${group.completeness.absolute.local}集/TMDB${group.completeness.absolute.aired}集,缺第${group.completeness.absolute.range}集`
+        : `季划分不同,${group.completeness.absolute.local}集齐全`
+      : "";
+    const missEpisodes = absoluteText
+      ? absoluteText
+      : missingEpisodes(group)
       .map((m) =>
         m.unknown
           ? `S${pad2(m.season)}:编号差异(本地${m.local}集/TMDB${m.aired}集)`
@@ -339,6 +407,8 @@ function exportCsv() {
   a.click();
   URL.revokeObjectURL(url);
 }
+
+onBeforeUnmount(() => stopPolling());
 
 onMounted(async () => {
   void accountsStore.loadAccounts();
@@ -470,7 +540,10 @@ onMounted(async () => {
       description="选一个目录后开始体检：先查媒体信息标签是否齐全、有没有扩展名混用，再按 TMDB 查缺季、缺集与缺失的电影续集。"
     />
 
-    <div v-else-if="scanning" class="audit-loading">正在拉取目录树并判定…</div>
+    <div v-else-if="scanning" class="audit-log-wrap">
+      <div class="audit-log__title">体检进行中，进度会实时输出：</div>
+      <pre ref="logBox" class="audit-log">{{ jobLogs.length ? jobLogs.map((l) => `[${l.time}] ${l.message}`).join("\n") : "正在启动…" }}</pre>
+    </div>
 
     <div v-else-if="!rows.length" class="audit-loading">没有需要处理的条目</div>
 
@@ -514,7 +587,24 @@ onMounted(async () => {
               <span v-if="!(group.missing ?? []).length && !group.mixed_ext" class="audit-ok">齐全</span>
             </td>
             <td class="audit-table__complete-col">
-              <template v-if="group.completeness">
+              <template v-if="group.completeness && group.completeness.absolute">
+                <span
+                  v-if="!group.completeness.absolute.missing.length"
+                  class="audit-ok"
+                  :title="`TMDB 按播出季切分，本地按合集切分；按连续集号核对，共 ${group.completeness.absolute.local} 集齐全`"
+                >季划分不同，集数齐全</span>
+                <span
+                  v-else
+                  class="audit-badge audit-badge--warn"
+                  :title="`本地 ${group.completeness.absolute.local} 集 / TMDB ${group.completeness.absolute.aired} 集；季划分不同，按连续集号比对`"
+                >编号差异 缺第 {{ group.completeness.absolute.range }} 集</span>
+                <span
+                  v-for="n in group.completeness.missing_seasons"
+                  :key="`absms-${n}`"
+                  class="audit-badge"
+                >缺 S{{ pad2(n) }}</span>
+              </template>
+              <template v-else-if="group.completeness">
                 <span
                   v-for="n in group.completeness.missing_seasons"
                   :key="`ms-${n}`"
@@ -694,6 +784,33 @@ onMounted(async () => {
 .audit-move__result {
   font-size: 13px;
   color: var(--text-muted);
+}
+
+.audit-log-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.audit-log__title {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.audit-log {
+  margin: 0;
+  padding: 10px 12px;
+  max-height: 320px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.6;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  color: var(--text-muted);
+  background: var(--surface-2, transparent);
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .audit-loading {

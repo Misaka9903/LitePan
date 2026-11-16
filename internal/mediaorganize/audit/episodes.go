@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -50,6 +51,21 @@ type SeasonDiff struct {
 	Note    string
 }
 
+// AbsoluteDiff 是「季划分不一致」时的兜底结论：两边都换算成连续集号再比。
+//
+// 例：TMDB 把整部作品记成一季 85 集，本地按 S1/S2/S3 分开放，
+// 逐季比对必然对不上；换算成绝对集号后能说清「缺第 67–85 集」。
+type AbsoluteDiff struct {
+	Local   int
+	Aired   int
+	Missing []int
+}
+
+// Range 把缺失集号压成「67–85」这样的区间描述，供日志与前端显示。
+func (a AbsoluteDiff) Range() string {
+	return episodeRanges(a.Missing)
+}
+
 // ShowDiff 是一部剧的季集比对结果。
 type ShowDiff struct {
 	Seasons []SeasonDiff
@@ -60,6 +76,8 @@ type ShowDiff struct {
 	LocalSeasons []int
 	LatestSeason int
 	Unreliable   bool
+	// Absolute 只在季划分对不上时给出（Unreliable 为 true 时）。
+	Absolute *AbsoluteDiff
 }
 
 // Bad 表示存在真正需要补的缺失（缺季或确有缺集）。
@@ -154,7 +172,145 @@ func CompareShow(local map[int][]int, tmdb []TMDBSeason, today time.Time) ShowDi
 			out.Unreliable = true
 		}
 	}
+	// 只要逐季结论里出现「缺季/缺集/编号对不上」，就用绝对集号再核一遍：
+	// 两侧季划分不同是常见的（TMDB 按播出季、本地按合集切），绝对集号能给出更实的结果。
+	if out.Unreliable || len(out.MissingSeasons) > 0 || anyMissingEpisodes(out.Seasons) {
+		if abs := compareAbsolute(local, aired, todayStr); abs != nil {
+			if len(abs.Missing) == 0 {
+				// 绝对集号齐全：季划分不同而已，撤掉逐季的误报。
+				out.MissingSeasons = nil
+				for i := range out.Seasons {
+					out.Seasons[i].Missing = nil
+					out.Seasons[i].Unknown = true
+					out.Seasons[i].Note = "季划分与 TMDB 不同，按绝对集号核对是齐的"
+				}
+				out.Unreliable = true
+			}
+			out.Absolute = abs
+		}
+	}
 	return out
+}
+
+// anyMissingEpisodes 判断逐季结论里是否有「确凿的缺集」（排除编号差异）。
+func anyMissingEpisodes(seasons []SeasonDiff) bool {
+	for _, s := range seasons {
+		if len(s.Missing) > 0 && !s.Unknown {
+			return true
+		}
+	}
+	return false
+}
+
+// compareAbsolute 把两侧都换算成「从第 1 集起的连续集号」再比，用于季划分不一致的作品。
+func compareAbsolute(local map[int][]int, aired map[int]TMDBSeason, todayStr string) *AbsoluteDiff {
+	// 任何一季没有集列表时都不换算：只有 episode_count 的话无法判断哪些集已播，
+	// 换算出来会把在播季的未播集也算成缺，比逐季结论更差。
+	for _, s := range aired {
+		if len(s.Episodes) == 0 {
+			return nil
+		}
+	}
+	localAbs, localTotal := absoluteNumbers(local, nil, todayStr)
+	airedAbs, airedTotal := absoluteNumbers(nil, aired, todayStr)
+	if localTotal == 0 || airedTotal == 0 {
+		return nil
+	}
+	missing := make([]int, 0, 8)
+	for abs := 1; abs <= airedTotal; abs++ {
+		if !airedAbs[abs] {
+			continue // 未播出/无该集
+		}
+		if !localAbs[abs] {
+			missing = append(missing, abs)
+		}
+	}
+	return &AbsoluteDiff{Local: localTotal, Aired: airedTotal, Missing: missing}
+}
+
+// absoluteNumbers 把「季号→集号」换算成连续集号：
+// 按季号升序累加，第 n 季的起始集号 = 前面各季的集数之和 + 1。
+func absoluteNumbers(local map[int][]int, aired map[int]TMDBSeason, todayStr string) (map[int]bool, int) {
+	out := map[int]bool{}
+	base := 0
+	if local != nil {
+		nums := make([]int, 0, len(local))
+		for n := range local {
+			if n > 0 {
+				nums = append(nums, n)
+			}
+		}
+		sort.Ints(nums)
+		for _, n := range nums {
+			eps := append([]int(nil), local[n]...)
+			sort.Ints(eps)
+			offset := 0
+			for i, e := range eps {
+				if i == 0 {
+					offset = e - 1
+				}
+				out[base+e-offset] = true
+			}
+			if len(eps) > 0 {
+				base += eps[len(eps)-1] - offset
+			}
+		}
+		return out, base
+	}
+	for _, n := range sortedSeasonNumbers(aired) {
+		s := aired[n]
+		eps := make([]int, 0, len(s.Episodes))
+		for _, e := range s.Episodes {
+			if e.Number <= 0 || strings.EqualFold(e.Type, "special") {
+				continue
+			}
+			d := strings.TrimSpace(e.AirDate)
+			if d == "" || d > todayStr {
+				continue
+			}
+			eps = append(eps, e.Number)
+		}
+		sort.Ints(eps)
+		offset := 0
+		for i, e := range eps {
+			if i == 0 {
+				offset = e - 1
+			}
+			out[base+e-offset] = true
+		}
+		if len(eps) > 0 {
+			base += eps[len(eps)-1] - offset
+		}
+	}
+	return out, base
+}
+
+// episodeRanges 把集号列表压成「5–7、9」这样的区间串。
+func episodeRanges(eps []int) string {
+	if len(eps) == 0 {
+		return ""
+	}
+	sorted := append([]int(nil), eps...)
+	sort.Ints(sorted)
+	parts := make([]string, 0, 4)
+	start, prev := sorted[0], sorted[0]
+	flush := func() {
+		if start == prev {
+			parts = append(parts, fmt.Sprintf("%d", start))
+			return
+		}
+		parts = append(parts, fmt.Sprintf("%d–%d", start, prev))
+	}
+	for _, e := range sorted[1:] {
+		if e == prev+1 {
+			prev = e
+			continue
+		}
+		flush()
+		start, prev = e, e
+	}
+	flush()
+	return strings.Join(parts, "、")
 }
 
 // CompareSeasons 只比对「哪一季整季没收录」，不看集号。

@@ -567,6 +567,46 @@ func (h *Handler) runMediaOrganizeAudit(w http.ResponseWriter, r *http.Request) 
 	writeOK(w, report)
 }
 
+// startMediaOrganizeAudit 起一个后台体检任务，立即返回 job id；进度用 getMediaOrganizeAuditJob 轮询。
+func (h *Handler) startMediaOrganizeAudit(w http.ResponseWriter, r *http.Request) {
+	if !ensureServiceReady(w, h.mediaOrganize != nil) {
+		return
+	}
+	var in mediaOrganizeAuditDTO
+	if err := decodeJSON(r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	job, err := h.mediaOrganize.StartAudit(mediaorganize.AuditRequest{
+		AccountID:      in.AccountID,
+		RootID:         in.RootID,
+		RootName:       in.RootName,
+		Required:       in.Required,
+		Unit:           in.Unit,
+		Exts:           in.Exts,
+		CheckSeasons:   in.CheckSeasons,
+		CheckEpisodes:  in.CheckEpisodes,
+		CheckFranchise: in.CheckFranchise,
+	})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeOK(w, map[string]any{"job_id": job.ID})
+}
+
+func (h *Handler) getMediaOrganizeAuditJob(w http.ResponseWriter, r *http.Request) {
+	if !ensureServiceReady(w, h.mediaOrganize != nil) {
+		return
+	}
+	job, ok := h.mediaOrganize.GetAuditJob(chi.URLParam(r, "id"))
+	if !ok {
+		writeErr(w, domain.Errorf(domain.CodeNotFound, "体检任务不存在"))
+		return
+	}
+	writeOK(w, job)
+}
+
 func (h *Handler) getMediaOrganizeAudit(w http.ResponseWriter, r *http.Request) {
 	if !ensureServiceReady(w, h.mediaOrganize != nil) {
 		return

@@ -56,6 +56,9 @@ type Service struct {
 	auditReports map[string]*AuditReport
 	auditOrder   []string
 
+	// auditJobs 保存异步体检的进度与日志（进程内）。
+	auditJobs map[string]*AuditJob
+
 	// tmdbCache 缓存完整性比对用到的 TMDB 结果（剧/季/合集），避免重复体检重复请求。
 	tmdbMu    sync.Mutex
 	tmdbCache map[string]tmdbCacheEntry

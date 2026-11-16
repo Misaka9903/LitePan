@@ -286,6 +286,14 @@ export interface MediaAuditSeasonStatus {
   note?: string;
 }
 
+/** 绝对集号兜底结论（季划分与 TMDB 不一致时） */
+export interface MediaAuditAbsolute {
+  local: number;
+  aired: number;
+  missing: number[];
+  range?: string;
+}
+
 export interface MediaAuditCompleteness {
   seasons: MediaAuditSeasonStatus[];
   missing_seasons: number[];
@@ -293,6 +301,7 @@ export interface MediaAuditCompleteness {
   latest_season: number;
   unreliable: boolean;
   unparsed: number;
+  absolute?: MediaAuditAbsolute;
 }
 
 export interface MediaAuditFranchisePart {
@@ -383,6 +392,25 @@ export interface MediaAuditReportRequest {
   check_seasons?: boolean;
   check_episodes?: boolean;
   check_franchise?: boolean;
+}
+
+/** 异步体检：先拿 job，再轮询进度与日志 */
+export interface MediaAuditJob {
+  id: string;
+  started_at: number;
+  done: boolean;
+  failed: boolean;
+  error?: string;
+  report_id?: string;
+  logs: Array<{ time: string; message: string }>;
+}
+
+export function startMediaOrganizeAudit(payload: MediaAuditRequest) {
+  return http.post<{ job_id: string }>("/admin/media-organize/audit/async", payload);
+}
+
+export function fetchMediaOrganizeAuditJob(id: string) {
+  return http.get<MediaAuditJob>(`/admin/media-organize/audit/job/${id}`);
 }
 
 export function runMediaOrganizeAudit(payload: MediaAuditRequest) {

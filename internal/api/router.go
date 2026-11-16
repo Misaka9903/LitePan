@@ -424,6 +424,8 @@ func NewRouter(d Deps) http.Handler {
 					r.Get("/search-tmdb", h.searchMediaOrganizeTMDB)
 					r.Post("/tasks/{id}/bindings", h.setMediaOrganizeBinding)
 					r.Post("/audit", h.runMediaOrganizeAudit)
+					r.Post("/audit/async", h.startMediaOrganizeAudit)
+					r.Get("/audit/job/{id}", h.getMediaOrganizeAuditJob)
 					r.Get("/audits", h.listMediaOrganizeAudits)
 					r.Get("/audit/{id}", h.getMediaOrganizeAudit)
 					r.Get("/audit/{id}/export", h.exportMediaOrganizeAudit)

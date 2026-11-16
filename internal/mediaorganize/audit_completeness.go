@@ -180,7 +180,11 @@ func (o completenessOptions) any() bool { return o.Seasons || o.Episodes || o.Fr
 // 只处理带 {tmdb-xxx} 标签的作品目录（用户库里都是整理过的，标签齐全）；
 // 未匹配/查询失败只做标记，不影响其它分组。
 func (s *Service) applyCompleteness(ctx context.Context, rep *audit.Report, client auditTMDBClient, interval time.Duration,
-	opts completenessOptions, today time.Time) int {
+	opts completenessOptions, today time.Time, progress ...func(string)) int {
+	var report func(string)
+	if len(progress) > 0 {
+		report = progress[0]
+	}
 	if rep == nil || client == nil || !opts.any() {
 		return 0
 	}
@@ -192,6 +196,9 @@ func (s *Service) applyCompleteness(ctx context.Context, rep *audit.Report, clie
 
 	for i := range rep.Groups {
 		g := &rep.Groups[i]
+		if report != nil && (i == 0 || (i+1)%10 == 0) {
+			report(fmt.Sprintf("比对中：%d/%d %s", i+1, len(rep.Groups), g.Name))
+		}
 		g.TMDBID = tmdbIDOfGroup(*g)
 		if g.TMDBID == "" {
 			if looksLikeTVGroup(*g) {

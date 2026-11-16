@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -111,6 +112,16 @@ type AuditCompleteness struct {
 	LatestSeason   int                 `json:"latest_season"`
 	Unreliable     bool                `json:"unreliable"`
 	Unparsed       int                 `json:"unparsed"`
+	// Absolute 只在季划分与 TMDB 不一致时给出：换算出连续集号的比对结果。
+	Absolute *AuditAbsolute `json:"absolute,omitempty"`
+}
+
+// AuditAbsolute 是绝对集号兜底结论。
+type AuditAbsolute struct {
+	Local   int    `json:"local"`
+	Aired   int    `json:"aired"`
+	Missing []int  `json:"missing"`
+	Range   string `json:"range,omitempty"`
 }
 
 // AuditFranchisePart 是合集里的一部作品。
@@ -167,8 +178,90 @@ type AuditReport struct {
 	raw audit.Report
 }
 
-// RunAudit 拉取目录树并做一次体检。
+// AuditJob 是一次异步体检的进度与日志，供前端轮询。
+type AuditJob struct {
+	ID        string     `json:"id"`
+	StartedAt int64      `json:"started_at"`
+	Done      bool       `json:"done"`
+	Failed    bool       `json:"failed"`
+	Error     string     `json:"error,omitempty"`
+	ReportID  string     `json:"report_id,omitempty"`
+	Logs      []LogEntry `json:"logs"`
+}
+
+// StartAudit 起一个后台体检任务并立刻返回，进度通过 /audit/job/{id} 轮询。
+func (s *Service) StartAudit(req AuditRequest) (*AuditJob, error) {
+	if s == nil || s.files == nil {
+		return nil, domain.Errorf(domain.CodeInternal, "文件服务不可用")
+	}
+	if strings.TrimSpace(req.RootID) == "" {
+		return nil, domain.Errorf(domain.CodeValidation, "root_id 不能为空")
+	}
+	job := &AuditJob{ID: newAuditID(), StartedAt: time.Now().Unix()}
+	s.mu.Lock()
+	if s.auditJobs == nil {
+		s.auditJobs = map[string]*AuditJob{}
+	}
+	s.auditJobs[job.ID] = job
+	s.mu.Unlock()
+
+	go func() {
+		// 后台任务不能用请求上下文：HTTP 响应返回后它就被取消了。
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		progress := func(msg string) { s.appendAuditLog(job.ID, msg) }
+		progress("开始体检…")
+		rep, err := s.runAuditReport(ctx, req, progress)
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		job.Done = true
+		if err != nil {
+			job.Failed = true
+			job.Error = err.Error()
+			job.Logs = append(job.Logs, LogEntry{Time: time.Now().Format("15:04:05"), Message: "体检失败：" + err.Error()})
+			return
+		}
+		job.ReportID = rep.ID
+	}()
+	return job, nil
+}
+
+// GetAuditJob 取异步体检的进度快照。
+func (s *Service) GetAuditJob(id string) (*AuditJob, bool) {
+	if s == nil {
+		return nil, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	job, ok := s.auditJobs[id]
+	if !ok {
+		return nil, false
+	}
+	snapshot := *job
+	snapshot.Logs = append([]LogEntry(nil), job.Logs...)
+	return &snapshot, true
+}
+
+func (s *Service) appendAuditLog(jobID, msg string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	job, ok := s.auditJobs[jobID]
+	if !ok {
+		return
+	}
+	job.Logs = append(job.Logs, LogEntry{Time: time.Now().Format("15:04:05"), Message: msg})
+	if len(job.Logs) > 400 {
+		job.Logs = job.Logs[len(job.Logs)-400:]
+	}
+}
+
+// RunAudit 拉取目录树并做一次体检（同步，脚本与旧前端用）。
 func (s *Service) RunAudit(ctx context.Context, req AuditRequest) (*AuditReport, error) {
+	return s.runAuditReport(ctx, req, nil)
+}
+
+// runAuditReport 是同步与异步体检共用的主体；progress 为 nil 时不输出进度。
+func (s *Service) runAuditReport(ctx context.Context, req AuditRequest, progress func(string)) (*AuditReport, error) {
 	if s == nil || s.files == nil {
 		return nil, domain.Errorf(domain.CodeInternal, "文件服务不可用")
 	}
@@ -195,17 +288,26 @@ func (s *Service) RunAudit(ctx context.Context, req AuditRequest) (*AuditReport,
 	// 避免体检绕过限速设置把网盘打出风控。
 	scanCtx := s.withAPIDelay(ctx)
 	// 缺季和缺集都要用本地季号，所以任一开启就收集（纯内存，不额外请求）。
-	rep, dirs, err := runAudit(scanCtx, s.files, req, required, unit, checkSeasons || checkEpisodes)
+	if progress != nil {
+		progress(fmt.Sprintf("开始拉取目录树（单位：%s，按设置间隔限速）…", unit))
+	}
+	rep, dirs, err := runAudit(scanCtx, s.files, req, required, unit, checkSeasons || checkEpisodes, progress)
 	if err != nil {
 		return nil, err
+	}
+	if progress != nil {
+		progress(fmt.Sprintf("目录树完成：%d 个目录 / %d 个文件 / %d 个分组", dirs, rep.TotalFiles, rep.TotalGroups))
 	}
 
 	// TMDB 完整性比对：只打 TMDB，不增加网盘请求；没配 key 时整段跳过。
 	tmdbCalls := 0
 	opts := completenessOptions{Seasons: checkSeasons, Episodes: checkEpisodes, Franchise: checkFranchise}
 	if opts.any() {
+		if progress != nil {
+			progress(fmt.Sprintf("开始 TMDB 比对：%d 个分组（限速 %s/请求）", len(rep.Groups), s.tmdbInterval()))
+		}
 		if client, cerr := s.newTMDBClient(""); cerr == nil {
-			tmdbCalls = s.applyCompleteness(ctx, &rep, client, s.tmdbInterval(), opts, time.Now())
+			tmdbCalls = s.applyCompleteness(ctx, &rep, client, s.tmdbInterval(), opts, time.Now(), progress)
 		} else {
 			checkSeasons, checkEpisodes, checkFranchise = false, false, false
 			req.CheckSeasons, req.CheckEpisodes, req.CheckFranchise = &checkSeasons, &checkEpisodes, &checkFranchise
@@ -255,14 +357,20 @@ func (s *Service) RunAudit(ctx context.Context, req AuditRequest) (*AuditReport,
 		}
 	}
 	report.Summary.MissingFranchises = len(franchises)
+	if progress != nil {
+		progress(fmt.Sprintf("完成：%d 个分组，标签不合格 %d，缺季 %d，缺集 %d，缺续集 %d，未匹配 %d（TMDB %d 次请求）",
+			report.Summary.TotalGroups, report.Summary.BadGroups, report.Summary.MissingSeasons,
+			report.Summary.MissingEpisodes, report.Summary.MissingMovies, report.Summary.UnmatchedGroups,
+			report.Summary.TMDBRequests))
+	}
 	s.storeAudit(report)
 	return report, nil
 }
 
 // runAudit 拉树并判定，供 RunAudit 与单测共用。
 func runAudit(ctx context.Context, lister auditLister, req AuditRequest, required []string, unit string,
-	collectEpisodes bool) (audit.Report, int, error) {
-	tree, dirs, err := buildAuditTree(ctx, lister, req.AccountID, req.RootID, req.RootName)
+	collectEpisodes bool, progress func(string)) (audit.Report, int, error) {
+	tree, dirs, err := buildAuditTree(ctx, lister, req.AccountID, req.RootID, req.RootName, progress)
 	if err != nil {
 		return audit.Report{}, dirs, err
 	}
@@ -453,6 +561,14 @@ func toAuditCompleteness(d audit.ShowDiff, unparsed int) *AuditCompleteness {
 	if out.Seasons == nil {
 		out.Seasons = []AuditSeasonStatus{}
 	}
+	if d.Absolute != nil {
+		out.Absolute = &AuditAbsolute{
+			Local:   d.Absolute.Local,
+			Aired:   d.Absolute.Aired,
+			Missing: nonNilInts(d.Absolute.Missing),
+			Range:   d.Absolute.Range(),
+		}
+	}
 	return out
 }
 
@@ -515,17 +631,26 @@ func boolOrDefault(v *bool, def bool) bool {
 }
 
 // buildAuditTree 拉取 rootID 下的完整目录树（逐目录并行遍历）。
-func buildAuditTree(ctx context.Context, lister auditLister, accountID int64, rootID, rootName string) (audit.Node, int, error) {
+func buildAuditTree(ctx context.Context, lister auditLister, accountID int64, rootID, rootName string,
+	progress func(string)) (audit.Node, int, error) {
 	name := strings.TrimSpace(rootName)
 	if name == "" {
 		name = rootID
 	}
 	if fl, ok := lister.(auditFullLister); ok {
-		if node, dirs, err := treeFromFullFiles(ctx, lister, fl, accountID, rootID, name); err == nil {
+		if node, dirs, err := treeFromFullFiles(ctx, lister, fl, accountID, rootID, name, progress); err == nil {
 			return node, dirs, nil
 		}
 	}
-	return treeFromList(ctx, lister, accountID, rootID, name)
+	return treeFromList(ctx, lister, accountID, rootID, name, progress)
+}
+
+// reportTreeProgress 每层列完目录报一次进度，让前端能看到「在动」。
+func reportTreeProgress(progress func(string), depth, dirs, files int) {
+	if progress == nil {
+		return
+	}
+	progress(fmt.Sprintf("列目录中：第 %d 层，已列 %d 个目录 / %d 个文件", depth+1, dirs, files))
 }
 
 // treeFromFullFiles 用「一次拉全量文件」+「按需列目录名」重建树。
@@ -534,7 +659,8 @@ func buildAuditTree(ctx context.Context, lister auditLister, accountID int64, ro
 // 一旦某个子目录出现在「有文件的 pid 集合」里，就把它的文件挂上并停止下钻。
 // 结束前核对挂上的文件数是否等于全量文件数，不相等说明结构比假设更深，
 // 直接返回错误让上层退回逐目录遍历，宁可慢也不能出现残缺的树。
-func treeFromFullFiles(ctx context.Context, lister auditLister, fl auditFullLister, accountID int64, rootID, rootName string) (audit.Node, int, error) {
+func treeFromFullFiles(ctx context.Context, lister auditLister, fl auditFullLister, accountID int64, rootID, rootName string,
+	progress func(string)) (audit.Node, int, error) {
 	supported, err := fl.SupportsFullList(ctx, accountID)
 	if err != nil || !supported {
 		return audit.Node{}, 0, domain.Errorf(domain.CodeNotImplement, "网盘不支持全量文件列表")
@@ -611,6 +737,7 @@ func treeFromFullFiles(ctx context.Context, lister auditLister, fl auditFullList
 			}
 		}
 		level = next
+		reportTreeProgress(progress, depth, dirs, attached)
 	}
 
 	if attached != len(entries) {
@@ -630,7 +757,8 @@ func treeFromFullFiles(ctx context.Context, lister auditLister, fl auditFullList
 	return build(root), dirs, nil
 }
 
-func treeFromList(ctx context.Context, lister auditLister, accountID int64, rootID, rootName string) (audit.Node, int, error) {
+func treeFromList(ctx context.Context, lister auditLister, accountID int64, rootID, rootName string,
+	progress func(string)) (audit.Node, int, error) {
 	type dirNode struct {
 		id    string
 		name  string
@@ -685,6 +813,7 @@ func treeFromList(ctx context.Context, lister auditLister, accountID int64, root
 			}
 		}
 		level = next
+		reportTreeProgress(progress, depth, dirs, files)
 	}
 
 	var build func(n *dirNode) audit.Node

@@ -235,3 +235,56 @@ func TestRunSingleShowRootWithTag(t *testing.T) {
 		t.Fatalf("单部作品分组不对: name=%q episodes=%+v", g.Name, g.Episodes)
 	}
 }
+
+// TMDB 把整部作品记成一季 85 集、本地按 S1/S2/S3 分开时，
+// 逐季对不上，改用绝对集号应报出「缺第 67–85 集」。
+func TestCompareShowAbsoluteFallback(t *testing.T) {
+	eps := make([]TMDBEpisode, 0, 85)
+	for i := 1; i <= 85; i++ {
+		eps = append(eps, TMDBEpisode{Number: i, AirDate: "2020-01-01", Type: "standard"})
+	}
+	local := map[int][]int{}
+	for s := 1; s <= 3; s++ {
+		n := 25
+		if s == 3 {
+			n = 16
+		}
+		list := make([]int, 0, n)
+		for i := 1; i <= n; i++ {
+			list = append(list, i)
+		}
+		local[s] = list
+	}
+	diff := CompareShow(local, []TMDBSeason{{Number: 1, EpisodeCount: 85, AirDate: "2016-04-03", Episodes: eps}}, testToday)
+
+	if diff.Absolute == nil {
+		t.Fatal("应给出绝对集号结论")
+	}
+	if diff.Absolute.Local != 66 || diff.Absolute.Aired != 85 {
+		t.Fatalf("绝对集号统计 = %d/%d, 期望 66/85", diff.Absolute.Local, diff.Absolute.Aired)
+	}
+	if got := diff.Absolute.Range(); got != "67–85" {
+		t.Fatalf("缺失区间 = %q, 期望 67–85", got)
+	}
+	if diff.Bad() {
+		t.Fatal("编号差异不应算不合格")
+	}
+}
+
+// 季划分不同但总集数齐全（TMDB 两季 12+12，本地并成一季 24）→ 不报缺季。
+func TestCompareShowDifferentSeasonSplitButComplete(t *testing.T) {
+	s1 := season(1, 12, dates(12, "2020-01-01")...)
+	s2 := season(2, 12, dates(12, "2020-06-01")...)
+	list := make([]int, 0, 24)
+	for i := 1; i <= 24; i++ {
+		list = append(list, i)
+	}
+	diff := CompareShow(map[int][]int{1: list}, []TMDBSeason{s1, s2}, testToday)
+
+	if diff.Bad() {
+		t.Fatalf("绝对集号齐全时不该报缺季/缺集: missingSeasons=%v seasons=%+v", diff.MissingSeasons, diff.Seasons)
+	}
+	if diff.Absolute == nil || len(diff.Absolute.Missing) != 0 {
+		t.Fatalf("应有绝对集号结论且无缺失: %+v", diff.Absolute)
+	}
+}
