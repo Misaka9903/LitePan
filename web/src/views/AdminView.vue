@@ -64,7 +64,7 @@ const PAGE_TABS: Record<string, { defaultTab: string; tabs: Record<string, strin
       strm: "STRM 任务",
       cache: "缓存任务",
       organize: "目录整理",
-      audit: "信息体检",
+      audit: "片库体检",
       automation: "自动联动",
     },
   },

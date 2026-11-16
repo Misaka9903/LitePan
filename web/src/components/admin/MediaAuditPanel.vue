@@ -3,7 +3,11 @@ import { computed, onMounted, ref } from "vue";
 import { storeToRefs } from "pinia";
 import { getApiErrorMessage } from "@/api/client";
 import type { MediaAuditGroup, MediaAuditMoveResult, MediaAuditReport } from "@/api/mediaOrganize";
-import { moveMediaOrganizeAudit, runMediaOrganizeAudit } from "@/api/mediaOrganize";
+import {
+  fetchMediaOrganizeSettings,
+  moveMediaOrganizeAudit,
+  runMediaOrganizeAudit,
+} from "@/api/mediaOrganize";
 import { useAccountsStore } from "@/stores/accounts";
 import AppButton from "@/components/base/AppButton.vue";
 import AccountFolderField from "@/components/admin/AccountFolderField.vue";
@@ -30,6 +34,8 @@ const scanning = ref(false);
 const report = ref<MediaAuditReport | null>(null);
 const onlyBad = ref(true);
 const unit = ref<"show" | "season">("show");
+/** 判定必填项，来自「目录整理 → 媒体信息顺序」 */
+const requiredTags = ref<string[]>(["screen_size", "video_codec", "audio_codec"]);
 const checkSeasons = ref(true);
 const checkEpisodes = ref(true);
 const checkFranchise = ref(true);
@@ -44,6 +50,14 @@ const missingLabels: Record<string, string> = {
 
 function labelOf(key: string) {
   return missingLabels[key] ?? key;
+}
+
+const requiredLabel = computed(() => requiredTags.value.map(labelOf).join(" · "));
+
+/** 每个缺失标签点上去能看到的解释 */
+function missingHint(key: string) {
+  const label = labelOf(key);
+  return `这一季里每个文件的文件名都解析不出${label}（只要有一个文件带就不算缺）`;
 }
 
 function openPicker() {
@@ -269,8 +283,18 @@ function exportCsv() {
   URL.revokeObjectURL(url);
 }
 
-onMounted(() => {
+onMounted(async () => {
   void accountsStore.loadAccounts();
+  try {
+    const settings = await fetchMediaOrganizeSettings();
+    const raw = settings.media_tag_order;
+    const order = typeof raw === "string" ? (JSON.parse(raw) as unknown) : raw;
+    if (Array.isArray(order) && order.length > 0) {
+      requiredTags.value = order.filter((key): key is string => typeof key === "string" && key in missingLabels);
+    }
+  } catch {
+    // 取不到设置就按默认三项显示，不影响体检本身
+  }
 });
 </script>
 
@@ -306,6 +330,25 @@ onMounted(() => {
       </AppButton>
       <AppButton v-if="report" type="button" variant="ghost" @click="exportCsv">导出 CSV</AppButton>
     </div>
+
+    <details class="audit-help">
+      <summary>体检说明</summary>
+      <ul>
+        <li>
+          <b>媒体信息</b>：按「目录整理 → 媒体信息顺序」的必填项（当前：<b>{{ requiredLabel }}</b>）判定，
+          某个文件的文件名里解析不出该项就算缺；<b>一季里所有文件都缺</b>才记到「缺失」列。
+        </li>
+        <li>
+          <b>扩展名一致性</b>：同一季混用多种媒体扩展名会标「扩展名混用」——整理时会被
+          「扩展名不一致时跳过整部剧」挡下，所以这里也按不合格算。
+        </li>
+        <li>
+          <b>内容完整性</b>：把文件名里的季集号与 TMDB 比对，报「缺哪一季」「某季缺哪几集」和「系列电影缺哪部」。
+          只读不改文件；在播季只算已播出集，Season 0 与特典（SP/OVA）不参与。
+        </li>
+        <li><b>不合格</b>：以上任一项命中即计入不合格，可勾「只看不合格」筛选后一键归集到整理目录。</li>
+      </ul>
+    </details>
 
     <div v-if="summary" class="audit-summary">
       <span>分组 <b>{{ summary.total_groups }}</b></span>
@@ -366,7 +409,7 @@ onMounted(() => {
       v-if="!report && !scanning"
       icon="hand-folder"
       title="还没有体检结果"
-      description="选一个目录后开始体检：按文件名解析出的分辨率、视频编码、音频编码判定，缺项的作品会被列出来。"
+      description="选一个目录后开始体检：先查媒体信息标签是否齐全、有没有扩展名混用，再按 TMDB 查缺季、缺集与缺失的电影续集。"
     />
 
     <div v-else-if="scanning" class="audit-loading">正在拉取目录树并判定…</div>
@@ -395,8 +438,14 @@ onMounted(() => {
             <td class="audit-table__season-col">{{ seasonCount(group) }}</td>
             <td class="audit-sample" :title="sampleOf(group)">{{ sampleOf(group) }}</td>
             <td class="audit-table__missing-col">
-              <span v-for="key in group.missing ?? []" :key="key" class="audit-badge">{{ labelOf(key) }}</span>
-              <span v-if="group.mixed_ext" class="audit-badge audit-badge--warn">扩展名混用</span>
+              <span v-for="key in group.missing ?? []" :key="key" class="audit-badge" :title="missingHint(key)">
+                {{ labelOf(key) }}
+              </span>
+              <span
+                v-if="group.mixed_ext"
+                class="audit-badge audit-badge--warn"
+                title="同一季里混用了多种媒体扩展名（如 mkv + mp4），整理时会被整部跳过"
+              >扩展名混用</span>
               <span v-if="!(group.missing ?? []).length && !group.mixed_ext" class="audit-ok">齐全</span>
             </td>
             <td class="audit-table__complete-col">
@@ -493,6 +542,32 @@ onMounted(() => {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface);
+  color: var(--text);
+}
+
+.audit-help {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.audit-help summary {
+  cursor: pointer;
+  color: var(--text);
+}
+
+.audit-help ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  line-height: 1.6;
+}
+
+.audit-help b {
   color: var(--text);
 }
 

@@ -109,7 +109,7 @@ const tabs = [
   { key: STRM_TAB, label: "STRM 任务" },
   { key: CACHE_TAB, label: "缓存任务" },
   { key: ORGANIZE_TAB, label: "目录整理" },
-  { key: AUDIT_TAB, label: "信息体检" },
+  { key: AUDIT_TAB, label: "片库体检" },
   { key: AUTOMATION_TAB, label: "自动联动" },
 ];
 
