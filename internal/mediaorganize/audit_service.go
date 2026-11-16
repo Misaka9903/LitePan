@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -200,11 +201,24 @@ func (s *Service) StartAudit(req AuditRequest) (*AuditJob, error) {
 		return nil, domain.Errorf(domain.CodeValidation, "root_id 不能为空")
 	}
 	job := &AuditJob{ID: newAuditID(), StartedAt: time.Now().Unix()}
+	accountKey := fmt.Sprint(req.AccountID)
 	s.mu.Lock()
 	if s.auditJobs == nil {
 		s.auditJobs = map[string]*AuditJob{}
 	}
+	if s.auditRunning == nil {
+		s.auditRunning = map[string]string{}
+	}
+	// 同一账号同时只跑一个体检：两个并发会把网盘请求率翻倍，风控风险不值得。
+	if runningID, ok := s.auditRunning[accountKey]; ok {
+		if prev, alive := s.auditJobs[runningID]; alive && !prev.Done {
+			s.mu.Unlock()
+			return nil, domain.Errorf(domain.CodeValidation, "该账号已有一个体检在进行，请等它结束后再试")
+		}
+	}
+	s.auditRunning[accountKey] = job.ID
 	s.auditJobs[job.ID] = job
+	s.pruneAuditJobsLocked()
 	s.mu.Unlock()
 
 	go func() {
@@ -213,10 +227,21 @@ func (s *Service) StartAudit(req AuditRequest) (*AuditJob, error) {
 		defer cancel()
 		progress := func(msg string) { s.appendAuditLog(job.ID, msg) }
 		progress("开始体检…")
-		rep, err := s.runAuditReport(ctx, req, progress)
+		var rep *AuditReport
+		var err error
+		func() {
+			defer func() {
+				// 后台 goroutine 里 panic 会让任务永远停在「进行中」，这里兜住并报失败。
+				if r := recover(); r != nil {
+					err = domain.Errorf(domain.CodeInternal, "体检异常中断：%v", r)
+				}
+			}()
+			rep, err = s.runAuditReport(ctx, req, progress)
+		}()
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		job.Done = true
+		delete(s.auditRunning, accountKey)
 		if err != nil {
 			job.Failed = true
 			job.Error = err.Error()
@@ -226,6 +251,29 @@ func (s *Service) StartAudit(req AuditRequest) (*AuditJob, error) {
 		job.ReportID = rep.ID
 	}()
 	return job, nil
+}
+
+// pruneAuditJobsLocked 只保留最近的一部分任务，避免长期运行后 map 无限增长。
+func (s *Service) pruneAuditJobsLocked() {
+	const keep = 30
+	if len(s.auditJobs) <= keep {
+		return
+	}
+	ids := make([]string, 0, len(s.auditJobs))
+	for id, job := range s.auditJobs {
+		if job.Done {
+			ids = append(ids, id)
+		}
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		return s.auditJobs[ids[i]].StartedAt < s.auditJobs[ids[j]].StartedAt
+	})
+	for _, id := range ids {
+		if len(s.auditJobs) <= keep {
+			return
+		}
+		delete(s.auditJobs, id)
+	}
 }
 
 // GetAuditJob 取异步体检的进度快照。
