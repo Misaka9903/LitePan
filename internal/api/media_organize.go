@@ -643,10 +643,11 @@ func (h *Handler) exportMediaOrganizeAudit(w http.ResponseWriter, r *http.Reques
 }
 
 type mediaAuditMoveDTO struct {
-	TargetID       string `json:"target_id"`
-	TargetParentID string `json:"target_parent_id"`
-	TargetName     string `json:"target_name"`
-	DryRun         *bool  `json:"dry_run"`
+	TargetID       string   `json:"target_id"`
+	TargetParentID string   `json:"target_parent_id"`
+	TargetName     string   `json:"target_name"`
+	DryRun         *bool    `json:"dry_run"`
+	GroupIDs       []string `json:"group_ids,omitempty"`
 }
 
 func (h *Handler) moveMediaOrganizeAudit(w http.ResponseWriter, r *http.Request) {
@@ -667,6 +668,7 @@ func (h *Handler) moveMediaOrganizeAudit(w http.ResponseWriter, r *http.Request)
 		TargetParentID: in.TargetParentID,
 		TargetName:     in.TargetName,
 		DryRun:         dryRun,
+		GroupIDs:       in.GroupIDs,
 	})
 	if err != nil {
 		writeErr(w, err)

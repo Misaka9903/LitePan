@@ -276,3 +276,41 @@ func TestMoveDoesNotRetryOtherErrors(t *testing.T) {
 		t.Fatalf("不该重试, 实际 %d 次", p.calls)
 	}
 }
+
+// 勾选后只搬选中的作品；显式选中时不再看它是否标签合格。
+func TestMoveAuditGroupsHonoursSelection(t *testing.T) {
+	m := moverWithRoot()
+	m.addDir("root", "show_b", "齐全剧")
+	rep := badReport()
+	rep.Groups = append(rep.Groups, AuditGroup{ID: "show_c", Name: "缺季剧", Files: 3, Bytes: 30})
+
+	out, err := moveAuditGroups(context.Background(), rep, m,
+		AuditMoveRequest{TargetID: "dest", DryRun: true, GroupIDs: []string{"show_b", "show_c"}})
+	if err != nil {
+		t.Fatalf("dry run: %v", err)
+	}
+	if out.Total != 2 || out.Files != 15 || out.Bytes != 80 {
+		t.Fatalf("只应统计选中的两部: %+v", out)
+	}
+	if len(m.moved) != 0 {
+		t.Fatal("dry run 不该真的移动")
+	}
+
+	// 真移动：只搬这两部
+	m.state["dest"] = nil
+	out, err = moveAuditGroups(context.Background(), rep, m,
+		AuditMoveRequest{TargetID: "dest", GroupIDs: []string{"show_b", "show_c"}})
+	if err != nil {
+		t.Fatalf("move: %v", err)
+	}
+	if out.Moved != 2 {
+		t.Fatalf("移动数 = %d, 期望 2", out.Moved)
+	}
+	names := map[string]bool{}
+	for _, it := range out.Items {
+		names[it.Name] = true
+	}
+	if !names["齐全剧"] || !names["缺季剧"] || names["缺编码剧"] {
+		t.Fatalf("移动清单不对: %+v", out.Items)
+	}
+}

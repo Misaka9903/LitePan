@@ -442,6 +442,8 @@ export interface MediaAuditMoveResult {
 }
 
 export interface MediaAuditMoveRequest {
+  /** 只搬这些作品；不传时搬全部「标签不合格」的作品 */
+  group_ids?: string[];
   target_id?: string;
   target_parent_id?: string;
   target_name?: string;

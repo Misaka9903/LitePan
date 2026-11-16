@@ -35,6 +35,9 @@ const rootName = ref("");
 const accountId = ref<number>(0);
 const scanning = ref(false);
 const jobLogs = ref<Array<{ time: string; message: string }>>([]);
+/** 归集移动的逐条勾选；默认勾上「有问题的」作品 */
+const selected = ref<Record<string, boolean>>({});
+const selectedCount = computed(() => Object.values(selected.value).filter(Boolean).length);
 const logBox = ref<HTMLElement | null>(null);
 let pollTimer: number | null = null;
 const report = ref<MediaAuditReport | null>(null);
@@ -127,8 +130,19 @@ function stopPolling() {
   }
 }
 
+function resetSelection() {
+  const map: Record<string, boolean> = {};
+  for (const group of (report.value?.groups ?? []).map(normalizeGroup)) {
+    if (isBad(group)) {
+      map[group.id] = true;
+    }
+  }
+  selected.value = map;
+}
+
 async function applyReport(data: Awaited<ReturnType<typeof runMediaOrganizeAudit>>) {
   report.value = data;
+  resetSelection();
   if (data.summary.bad_groups === 0) {
     toast.success(`体检完成：${data.summary.total_groups} 部全部齐全`);
   } else {
@@ -251,6 +265,29 @@ function isBad(group: MediaAuditGroup) {
   return (group.franchise?.missing?.length ?? 0) > 0;
 }
 
+const visibleIds = computed(() => rows.value.map((g) => g.id));
+const allVisibleSelected = computed(
+  () => visibleIds.value.length > 0 && visibleIds.value.every((id) => selected.value[id]),
+);
+
+function toggleSelected(id: string, on: boolean) {
+  selected.value = { ...selected.value, [id]: on };
+}
+
+function toggleAllVisible(on: boolean) {
+  const next = { ...selected.value };
+  for (const id of visibleIds.value) {
+    next[id] = on;
+  }
+  selected.value = next;
+}
+
+function selectedGroupIds() {
+  return Object.entries(selected.value)
+    .filter(([, on]) => on)
+    .map(([id]) => id);
+}
+
 function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
@@ -293,8 +330,12 @@ function sampleOf(group: MediaAuditGroup) {
 }
 
 function openMovePicker() {
-  if (!report.value?.summary.bad_groups) {
-    toast.error("没有不合格的作品可移动");
+  if (!report.value) {
+    toast.error("请先体检");
+    return;
+  }
+  if (selectedCount.value === 0) {
+    toast.error("请先勾选要归集的作品");
     return;
   }
   movePickerOpen.value = true;
@@ -316,11 +357,17 @@ async function doMove(dryRun: boolean) {
     toast.error("请先选择目标目录");
     return;
   }
+  const ids = selectedGroupIds();
+  if (ids.length === 0) {
+    toast.error("请先勾选要归集的作品");
+    return;
+  }
   moving.value = true;
   try {
     const result = await moveMediaOrganizeAudit(data.id, {
       target_id: moveTargetId.value,
       dry_run: dryRun,
+      group_ids: ids,
     });
     moveResult.value = result;
     if (dryRun) {
@@ -502,18 +549,18 @@ onMounted(async () => {
       </label>
     </div>
 
-    <div v-if="report && summary && summary.bad_groups > 0" class="audit-move">
-      <span class="audit-move__label">归集不合格剧集</span>
+    <div v-if="report && summary && (selectedCount > 0 || summary.bad_groups > 0)" class="audit-move">
+      <span class="audit-move__label">归集选中作品（已选 {{ selectedCount }} 部）</span>
       <AccountFolderField
         :display="moveTargetName"
         placeholder="选择归集目标目录"
         @browse="openMovePicker"
       />
-      <AppButton type="button" variant="ghost" :disabled="moving" @click="doMove(true)">预览移动</AppButton>
+      <AppButton type="button" variant="ghost" :disabled="moving || selectedCount === 0" @click="doMove(true)">预览移动</AppButton>
       <AppButton
         type="button"
         variant="primary"
-        :disabled="moving || !moveResult || moveResult.dry_run !== true"
+        :disabled="moving || selectedCount === 0 || !moveResult || moveResult.dry_run !== true"
         @click="doMove(false)"
       >
         {{ moving ? "处理中…" : "执行移动" }}
@@ -551,6 +598,14 @@ onMounted(async () => {
       <table class="admin-table audit-table">
         <thead>
           <tr>
+            <th class="audit-table__pick-col">
+              <input
+                type="checkbox"
+                :checked="allVisibleSelected"
+                title="全选当前列出的作品"
+                @change="toggleAllVisible(($event.target as HTMLInputElement).checked)"
+              />
+            </th>
             <th>作品</th>
             <th class="audit-table__season-col">目录</th>
             <th>样本文件</th>
@@ -562,6 +617,13 @@ onMounted(async () => {
         </thead>
         <tbody>
           <tr v-for="group in rows" :key="group.id">
+            <td class="audit-table__pick-col">
+              <input
+                type="checkbox"
+                :checked="!!selected[group.id]"
+                @change="toggleSelected(group.id, ($event.target as HTMLInputElement).checked)"
+              />
+            </td>
             <td>
               <div class="audit-name" :title="group.path">{{ group.name }}</div>
               <div v-if="group.mixed" class="audit-sub">同季签名不一致</div>
@@ -829,6 +891,11 @@ onMounted(async () => {
 
 .audit-table__missing-col {
   width: 200px;
+}
+
+.audit-table__pick-col {
+  width: 36px;
+  text-align: center;
 }
 
 .audit-table__complete-col {

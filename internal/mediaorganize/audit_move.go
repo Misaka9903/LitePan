@@ -41,6 +41,8 @@ type AuditMoveRequest struct {
 	TargetParentID string `json:"target_parent_id"`
 	TargetName     string `json:"target_name"`
 	DryRun         bool   `json:"dry_run"`
+	// GroupIDs 为空时搬「标签不合格」的全部作品；指定后只搬选中的（显式选择不再看是否合格）。
+	GroupIDs []string `json:"group_ids,omitempty"`
 }
 
 // auditMover 是归集移动需要的文件操作能力，*file.Service 直接满足；抽成接口便于单测。
@@ -87,8 +89,21 @@ func moveAuditGroups(ctx context.Context, rep *AuditReport, mover auditMover, re
 		return nil, domain.Errorf(domain.CodeValidation, "报告缺少根目录 ID")
 	}
 
+	selected := make(map[string]struct{}, len(req.GroupIDs))
+	for _, id := range req.GroupIDs {
+		if strings.TrimSpace(id) != "" {
+			selected[id] = struct{}{}
+		}
+	}
 	bad := make([]AuditGroup, 0, len(rep.Groups))
 	for _, g := range rep.Groups {
+		if len(selected) > 0 {
+			// 前端勾选后按选择搬：勾中了就搬，不再看它是否标签不合格。
+			if _, ok := selected[g.ID]; ok {
+				bad = append(bad, g)
+			}
+			continue
+		}
 		if !g.OK {
 			bad = append(bad, g)
 		}
