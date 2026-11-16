@@ -357,12 +357,16 @@ func (s *Service) fillFranchises(f *tmdbFetcher, rep *audit.Report, byCollection
 // 用于区分正片续集和重剪/合集版（合集接口本身不带 runtime）。
 func enrichMissingParts(f *tmdbFetcher, parts []audit.FranchisePart, local map[string]audit.FranchisePart, today time.Time) {
 	todayStr := today.Format("2006-01-02")
-	// 只有「晚于本地全部作品」的 part 才需要 runtime（用来判重剪/合集版）；
+	// 只有「晚于本合集里已收录全部作品」的 part 才需要 runtime（用来判重剪/合集版）；
 	// 更早的属于前传判定、夹在中间的必然是缺，都不必多查一次详情。
+	// 注意必须只看本合集内的作品：拿整库最晚日期会把老合集的重剪版全部跳过。
 	latestLocal := ""
-	for _, lp := range local {
-		if lp.ReleaseDate != "" && lp.ReleaseDate > latestLocal {
-			latestLocal = lp.ReleaseDate
+	for _, p := range parts {
+		if _, ok := local[p.ID]; !ok {
+			continue
+		}
+		if p.ReleaseDate > latestLocal {
+			latestLocal = p.ReleaseDate
 		}
 	}
 	enriched := 0

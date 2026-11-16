@@ -366,3 +366,39 @@ func TestEnrichMissingPartsOnlyForLaterParts(t *testing.T) {
 		t.Fatalf("TMDB 调用 = %d, 期望 2（不额外 enrich 更早的续集）", client.calls)
 	}
 }
+
+// 回归：整库里有更新的电影时，不能让老合集里的重剪版被跳过详情查询（会误判成缺）。
+func TestEnrichMissingPartsUsesCollectionLocalDates(t *testing.T) {
+	rep := auditRunTree(t, dirNode("电影", "root",
+		dirNode("冬春篇 (2015) {tmdb-336026}", "m1", fileNode("冬春篇 (2015) [2160p].mkv")),
+		dirNode("夏秋篇 (2014) {tmdb-294682}", "m3", fileNode("夏秋篇 (2014) [2160p].mkv")),
+		dirNode("新片 (2026) {tmdb-900}", "m2", fileNode("新片 (2026) [2160p].mkv")),
+	))
+	client := &stubAuditTMDB{
+		movie: map[string]map[string]any{
+			"336026": {"id": 336026, "title": "小森林：冬春篇", "release_date": "2015-01-28", "runtime": 120,
+				"belongs_to_collection": map[string]any{"id": 66, "name": "小森林（系列）"}},
+			"294682": {"id": 294682, "title": "小森林：夏秋篇", "release_date": "2014-08-30", "runtime": 111},
+			"890406": {"id": 890406, "title": "小森林：四季", "release_date": "2018-03-22", "runtime": 120},
+			"900":    {"id": 900, "title": "新片", "release_date": "2026-05-01", "runtime": 100},
+		},
+		collections: map[string]map[string]any{
+			"66": {"id": 66, "name": "小森林（系列）", "parts": []any{
+				map[string]any{"id": 294682, "title": "小森林：夏秋篇", "release_date": "2014-08-30"},
+				map[string]any{"id": 336026, "title": "小森林：冬春篇", "release_date": "2015-01-28"},
+				map[string]any{"id": 890406, "title": "小森林：四季", "release_date": "2018-03-22"},
+			}},
+		},
+	}
+	(&Service{}).applyCompleteness(context.Background(), &rep, client, 0,
+		completenessOptions{Franchise: true}, time.Now())
+
+	for _, g := range rep.Groups {
+		if g.Franchise == nil {
+			continue
+		}
+		if len(g.Franchise.Missing) != 0 || len(g.Franchise.Optional) != 1 {
+			t.Fatalf("重剪版应判可选: missing=%v optional=%v", g.Franchise.Missing, g.Franchise.Optional)
+		}
+	}
+}
