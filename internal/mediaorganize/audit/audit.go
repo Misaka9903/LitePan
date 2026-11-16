@@ -351,13 +351,13 @@ func groupKey(unit, path, rootName string, rootTagged bool) (key, name, gpath st
 	path = strings.Trim(path, "/")
 	if unit == "season" {
 		if path == "" {
-			return "\x00root", rootName, ""
+			return "\x00root", shortName(rootName), ""
 		}
 		return "d:" + path, path, path
 	}
 	if path == "" || rootTagged {
 		// 根目录自己就是一部作品（用户直接选了某部剧/电影）时，整棵树归它。
-		return "\x00root", rootName, ""
+		return "\x00root", shortName(rootName), ""
 	}
 	gp := showGroupPath(path)
 	segs := strings.Split(gp, "/")
@@ -372,6 +372,16 @@ func groupKey(unit, path, rootName string, rootTagged bool) (key, name, gpath st
 //   - 韩剧/剧名 {tmdb-1}/Season 01        → 剧名目录
 //   - 动漫/鬼灭之刃（系列）/鬼灭之刃 {tmdbid-2}/Season 1 → 容器里的作品目录
 //   - 动漫/进击的巨人 {tmdb-3}/最终季 完结篇 {tmdbid-4}/ → 剧场版目录（不并进剧集）
+//
+// shortName 取路径最后一段，用于扫描根自身的显示名。
+func shortName(name string) string {
+	name = strings.Trim(strings.TrimSpace(name), "/")
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		return name[i+1:]
+	}
+	return name
+}
+
 func showGroupPath(path string) string {
 	segs := strings.Split(path, "/")
 	for i := len(segs) - 1; i >= 0; i-- {
