@@ -120,3 +120,37 @@ func TestSharesSeriesName(t *testing.T) {
 		}
 	}
 }
+
+// 实测：鬼灭之刃（系列）13 部里大量是按剧集篇章重剪的上映版，
+// 早于已收录作品或被标为「…篇」的应降为可选，真续集（三十极夜2）不能被降级。
+func TestCompareCollectionRecapFilmsAreOptional(t *testing.T) {
+	local2024 := part("1216221", "鬼灭之刃：绊之奇迹，迈向柱训练", "2024-02-02", 105)
+	parts := []FranchisePart{
+		local2024,
+		part("1", "鬼灭之刃：兄妹之绊", "2019-03-29", 113),
+		part("2", "鬼灭之刃：那田蜘蛛山篇", "2021-11-17", 138),
+		part("3", "鬼灭之刃 游郭潜入篇", "2025-05-23", 122),
+		part("4", "鬼灭之刃 刀匠村 敌袭篇", "2025-06-06", 0),
+	}
+	local := map[string]FranchisePart{"1216221": local2024}
+	diff := CompareCollection("鬼灭之刃（系列）", parts, local, testToday)
+
+	if diff.Bad() {
+		t.Fatalf("篇章重剪版被当成缺续集: %v", titles(diff.Missing))
+	}
+	if len(diff.Optional) != 4 {
+		t.Fatalf("可选数 = %d, 期望 4 (%v)", len(diff.Optional), titles(diff.Optional))
+	}
+}
+
+// 回归：同合集名、时长更短的真续集不能被降级为「重剪版」。
+func TestCompareCollectionSequelWithSameNameStaysMissing(t *testing.T) {
+	first := part("4513", "三十极夜", "2007-10-17", 113)
+	parts := []FranchisePart{first, part("42941", "三十极夜2：黑暗的日子", "2010-10-04", 92)}
+	local := map[string]FranchisePart{"4513": first}
+	diff := CompareCollection("三十极夜（系列）", parts, local, testToday)
+
+	if len(diff.Missing) != 1 || diff.Missing[0].ID != "42941" {
+		t.Fatalf("真续集应算缺: missing=%v optional=%v", titles(diff.Missing), titles(diff.Optional))
+	}
+}

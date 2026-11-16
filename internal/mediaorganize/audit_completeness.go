@@ -20,7 +20,8 @@ const (
 	// tmdbCacheTTL 是进程内 TMDB 结果缓存的有效期；同一份库一天内重复体检几乎零请求。
 	tmdbCacheTTL = 12 * time.Hour
 	// franchiseEnrichMax 限制每个合集额外查详情的部数（补 runtime 用于判断重剪版）。
-	franchiseEnrichMax = 8
+	// 实测《鬼灭之刃（系列）》有 13 部候选，8 部不够用。
+	franchiseEnrichMax = 20
 )
 
 // auditTMDBClient 是完整性比对需要的 TMDB 能力，*tmdb.Client 直接满足；抽成接口便于单测。

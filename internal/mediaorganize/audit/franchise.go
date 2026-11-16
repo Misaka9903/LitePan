@@ -63,7 +63,7 @@ func CompareCollection(name string, parts []FranchisePart, local map[string]Fran
 			out.Local = append(out.Local, p)
 			continue
 		}
-		if reason := optionalReason(p, localParts); reason != "" {
+		if reason := optionalReason(p, localParts, name); reason != "" {
 			out.Optional = append(out.Optional, p)
 			out.Notes[p.ID] = reason
 			continue
@@ -79,7 +79,16 @@ func CompareCollection(name string, parts []FranchisePart, local map[string]Fran
 }
 
 // optionalReason 判断一部未收录的作品是否属于「可选」档；返回空串表示按正片缺处理。
-func optionalReason(part FranchisePart, localParts []FranchisePart) string {
+//
+// 合集里常混着三类「不算缺」的东西：早于正片的前传/序章、同一剧情的重剪合集版、
+// 以及番剧按篇章重剪的上映版（如《鬼灭之刃：游郭潜入篇》）。判据：
+//   - 早于已收录全部作品，且标题与本地作品或合集名同系列 → 前传/序章；
+//   - 晚于已收录全部作品，且标题与本地某部同系列、时长不超过其 1.1 倍 → 重剪/合集版；
+//   - 晚于已收录全部作品，标题与合集同系列且本身是「…篇/编/总集/合集/BONUS」→ 篇章合集。
+//
+// 只用「合集名」而不看时长是危险的：像《三十极夜2》这种真续集，名同、时长也接近，
+// 会被误降级，所以那条分支额外要求标题带合集性标记。
+func optionalReason(part FranchisePart, localParts []FranchisePart, collectionName string) string {
 	if len(localParts) == 0 || strings.TrimSpace(part.ReleaseDate) == "" {
 		return ""
 	}
@@ -98,23 +107,62 @@ func optionalReason(part FranchisePart, localParts []FranchisePart) string {
 			maxRuntime = lp.Runtime
 		}
 	}
-	shared := false
+	sharedLocal := false
+	sharedLocalNonSequel := false
 	for _, lp := range localParts {
-		if sharesSeriesName(part.Title, lp.Title) {
-			shared = true
-			break
+		if !sharesSeriesName(part.Title, lp.Title) {
+			continue
+		}
+		sharedLocal = true
+		if !sequelOf(part.Title, lp.Title) {
+			sharedLocalNonSequel = true
 		}
 	}
-	if !shared {
+	sharedCollection := sharesSeriesName(part.Title, collectionName)
+	if !sharedLocal && !sharedCollection {
 		return ""
 	}
 	if earliest != "" && part.ReleaseDate < earliest {
 		return "前传/序章（上映早于已收录的正片）"
 	}
-	if latest != "" && part.ReleaseDate > latest && runtimeComparable(part.Runtime, maxRuntime) {
+	if latest == "" || part.ReleaseDate <= latest {
+		return ""
+	}
+	if sharedLocalNonSequel && runtimeComparable(part.Runtime, maxRuntime) {
 		return "重剪/合集版（时长不超过已收录的最长版本）"
 	}
+	if sharedCollection && isCompilationTitle(part.Title) {
+		return "篇章合集/总集篇（按剧集篇章重剪）"
+	}
 	return ""
+}
+
+// sequelOf 判断 partTitle 是否为 baseTitle 的「序号续集」：
+// 标题在公共前缀之后紧跟数字（《三十极夜2》《教父2》《疾速追杀4》）。
+// 这类条目即使名同、时长接近，也必须按正片缺报，不能降级成重剪版。
+func sequelOf(partTitle, baseTitle string) bool {
+	a := []rune(normalizeTitle(partTitle))
+	b := []rune(normalizeTitle(baseTitle))
+	if len(b) == 0 || len(a) <= len(b) {
+		return false
+	}
+	for i := range b {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return unicode.IsDigit(a[len(b)])
+}
+
+// isCompilationTitle 判断标题是否带「篇章合集」性质的字样。
+func isCompilationTitle(title string) bool {
+	lower := strings.ToLower(title)
+	for _, kw := range []string{"总集", "合集", "篇", "编", "bonus", "special", "recap"} {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
 }
 
 func runtimeComparable(part, max int) bool {

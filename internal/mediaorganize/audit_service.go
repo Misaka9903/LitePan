@@ -219,6 +219,7 @@ func (s *Service) RunAudit(ctx context.Context, req AuditRequest) (*AuditReport,
 	}
 	report.Request.Required = required
 	report.Request.Unit = unit
+	franchises := map[string]struct{}{}
 	for _, g := range rep.Groups {
 		ag := toAuditGroup(g)
 		report.Groups = append(report.Groups, ag)
@@ -236,13 +237,15 @@ func (s *Service) RunAudit(ctx context.Context, req AuditRequest) (*AuditReport,
 			}
 		}
 		if ag.Franchise != nil && len(ag.Franchise.Missing) > 0 {
-			report.Summary.MissingFranchises++
+			// 同一合集可能落在多个作品目录里，按合集名去重，避免重复计数。
+			franchises[ag.Franchise.Name] = struct{}{}
 			report.Summary.MissingMovies += len(ag.Franchise.Missing)
 		}
 		if auditGroupIncomplete(ag) {
 			report.Summary.IncompleteGroups++
 		}
 	}
+	report.Summary.MissingFranchises = len(franchises)
 	s.storeAudit(report)
 	return report, nil
 }
