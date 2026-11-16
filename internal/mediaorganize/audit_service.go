@@ -202,21 +202,13 @@ func (s *Service) StartAudit(req AuditRequest) (*AuditJob, error) {
 	}
 	job := &AuditJob{ID: newAuditID(), StartedAt: time.Now().Unix()}
 	accountKey := fmt.Sprint(req.AccountID)
+	if err := s.acquireAudit(accountKey, job.ID); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	if s.auditJobs == nil {
 		s.auditJobs = map[string]*AuditJob{}
 	}
-	if s.auditRunning == nil {
-		s.auditRunning = map[string]string{}
-	}
-	// 同一账号同时只跑一个体检：两个并发会把网盘请求率翻倍，风控风险不值得。
-	if runningID, ok := s.auditRunning[accountKey]; ok {
-		if prev, alive := s.auditJobs[runningID]; alive && !prev.Done {
-			s.mu.Unlock()
-			return nil, domain.Errorf(domain.CodeValidation, "该账号已有一个体检在进行，请等它结束后再试")
-		}
-	}
-	s.auditRunning[accountKey] = job.ID
 	s.auditJobs[job.ID] = job
 	s.pruneAuditJobsLocked()
 	s.mu.Unlock()
@@ -238,10 +230,10 @@ func (s *Service) StartAudit(req AuditRequest) (*AuditJob, error) {
 			}()
 			rep, err = s.runAuditReport(ctx, req, progress)
 		}()
+		s.releaseAudit(accountKey)
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		job.Done = true
-		delete(s.auditRunning, accountKey)
 		if err != nil {
 			job.Failed = true
 			job.Error = err.Error()
@@ -251,6 +243,32 @@ func (s *Service) StartAudit(req AuditRequest) (*AuditJob, error) {
 		job.ReportID = rep.ID
 	}()
 	return job, nil
+}
+
+// acquireAudit 占用「该账号正在体检」的位置；同一账号同时只允许一个体检，
+// 两个并发会把网盘请求率翻倍，风控风险不值得。
+func (s *Service) acquireAudit(accountKey, token string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.auditRunning == nil {
+		s.auditRunning = map[string]string{}
+	}
+	if s.auditJobs == nil {
+		s.auditJobs = map[string]*AuditJob{}
+	}
+	if prevID, ok := s.auditRunning[accountKey]; ok {
+		if prev, alive := s.auditJobs[prevID]; alive && !prev.Done {
+			return domain.Errorf(domain.CodeValidation, "该账号已有一个体检在进行，请等它结束后再试")
+		}
+	}
+	s.auditRunning[accountKey] = token
+	return nil
+}
+
+func (s *Service) releaseAudit(accountKey string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.auditRunning, accountKey)
 }
 
 // pruneAuditJobsLocked 只保留最近的一部分任务，避免长期运行后 map 无限增长。
@@ -307,6 +325,11 @@ func (s *Service) appendAuditLog(jobID, msg string) {
 
 // RunAudit 拉取目录树并做一次体检（同步，脚本与旧前端用）。
 func (s *Service) RunAudit(ctx context.Context, req AuditRequest) (*AuditReport, error) {
+	accountKey := fmt.Sprint(req.AccountID)
+	if err := s.acquireAudit(accountKey, "sync"); err != nil {
+		return nil, err
+	}
+	defer s.releaseAudit(accountKey)
 	return s.runAuditReport(ctx, req, nil)
 }
 
