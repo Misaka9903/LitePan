@@ -45,6 +45,7 @@ const onlyBad = ref(true);
 const unit = ref<"show" | "season">("show");
 /** 判定必填项，来自「目录整理 → 媒体信息顺序」 */
 const requiredTags = ref<string[]>(["screen_size", "video_codec", "audio_codec"]);
+const checkMediaInfo = ref(true);
 const checkSeasons = ref(true);
 const checkEpisodes = ref(true);
 const checkFranchise = ref(true);
@@ -113,11 +114,16 @@ function onFolderPicked(payload: { accountId: number; parentId: string; path: st
   report.value = null;
 }
 
+const anyCheck = computed(
+  () => checkMediaInfo.value || checkSeasons.value || checkEpisodes.value || checkFranchise.value,
+);
+
 const payload = computed(() => ({
   account_id: accountId.value,
   root_id: rootId.value,
   root_name: rootName.value,
   unit: unit.value,
+  check_media_info: checkMediaInfo.value,
   check_seasons: checkSeasons.value,
   check_episodes: checkEpisodes.value,
   check_franchise: checkFranchise.value,
@@ -154,6 +160,10 @@ async function applyReport(data: Awaited<ReturnType<typeof runMediaOrganizeAudit
 async function startAudit() {
   if (!rootId.value) {
     toast.error("请先选择要体检的目录");
+    return;
+  }
+  if (!anyCheck.value) {
+    toast.error("至少选择一项检查");
     return;
   }
   scanning.value = true;
@@ -487,6 +497,10 @@ onMounted(async () => {
           <option value="season">按目录</option>
         </select>
       </label>
+      <label class="audit-unit" :title="`按「目录整理 → 媒体信息顺序」判定文件名里有没有分辨率/编码，并检查同季扩展名是否混用（当前必填：${requiredLabel}）`">
+        <input v-model="checkMediaInfo" type="checkbox" />
+        查媒体信息
+      </label>
       <label class="audit-unit" title="TMDB 已播出、本地整季都没有的季（如第 3 季在播而本地只有两季）；每部剧只多 1 次请求">
         <input v-model="checkSeasons" type="checkbox" />
         查缺季
@@ -499,7 +513,13 @@ onMounted(async () => {
         <input v-model="checkFranchise" type="checkbox" />
         查电影续集
       </label>
-      <AppButton type="button" variant="primary" :disabled="scanning" @click="startAudit">
+      <AppButton
+        type="button"
+        variant="primary"
+        :disabled="scanning || !anyCheck"
+        :title="anyCheck ? '' : '至少选择一项检查'"
+        @click="startAudit"
+      >
         {{ scanning ? "扫描中…" : "开始体检" }}
       </AppButton>
       <AppButton v-if="report" type="button" variant="ghost" @click="exportCsv">导出 CSV</AppButton>
@@ -509,13 +529,11 @@ onMounted(async () => {
       <summary>体检说明</summary>
       <ul>
         <li>
-          <b>媒体信息</b>：按「目录整理 → 媒体信息顺序」的必填项（当前：<b>{{ requiredLabel }}</b>）判定。
-          <b>缺一集就记</b>到「缺失」列——整理是逐文件拼标签的，个别集缺会直接体现成同一季命名不一致；
-          徽标上的 <b>8/24</b> 表示 24 集里有 8 集缺。特典（SP / OVA / NCOP / 花絮）不参与判定。
-        </li>
-        <li>
-          <b>扩展名一致性</b>：同一季混用多种媒体扩展名会标「扩展名混用」——整理时会被
-          「扩展名不一致时跳过整部剧」挡下，所以这里也按不合格算。
+          <b>媒体信息</b>（一个开关管两项）：① 按「目录整理 → 媒体信息顺序」的必填项
+          （当前：<b>{{ requiredLabel }}</b>）判定文件名里有没有这些标签，<b>缺一集就记</b>——
+          整理是逐文件拼标签的，个别集缺会直接体现成同一季命名不一致，徽标上的 <b>8/24</b> 表示 24 集里有 8 集缺；
+          ② 同一季混用多种媒体扩展名会标「扩展名混用」，整理时会被「扩展名不一致时跳过整部剧」挡下。
+          特典（SP / OVA / NCOP / 花絮）不参与判定。
         </li>
         <li>
           <b>内容完整性</b>：把文件名里的季集号与 TMDB 比对，报「缺哪一季」「某季缺哪几集」和「系列电影缺哪部」。

@@ -52,7 +52,9 @@ type AuditRequest struct {
 	Required  []string `json:"required"`
 	Unit      string   `json:"unit"`
 	Exts      string   `json:"exts"`
-	// CheckSeasons / CheckEpisodes / CheckFranchise 为 nil 时按开启处理（前端不传＝默认检查）。
+	// 各项开关为 nil 时按开启处理（前端不传＝默认检查）。
+	// CheckMediaInfo 同时管「媒体信息标签缺失」与「扩展名混用」两项。
+	CheckMediaInfo *bool `json:"check_media_info,omitempty"`
 	CheckSeasons   *bool `json:"check_seasons,omitempty"`
 	CheckEpisodes  *bool `json:"check_episodes,omitempty"`
 	CheckFranchise *bool `json:"check_franchise,omitempty"`
@@ -272,11 +274,12 @@ func (s *Service) runAuditReport(ctx context.Context, req AuditRequest, progress
 	if unit != auditUnitSeason {
 		unit = auditUnitShow
 	}
+	checkMedia := boolOrDefault(req.CheckMediaInfo, true)
 	required := normalizeAuditRequired(req.Required)
 	if len(required) == 0 {
 		required = s.mediaTagOrderFromSettings()
 	}
-	if len(required) == 0 {
+	if checkMedia && len(required) == 0 {
 		return nil, domain.Errorf(domain.CodeValidation, "没有可判定的媒体信息项，请先在设置里配置媒体信息顺序")
 	}
 
@@ -291,7 +294,11 @@ func (s *Service) runAuditReport(ctx context.Context, req AuditRequest, progress
 	if progress != nil {
 		progress(fmt.Sprintf("开始拉取目录树（单位：%s，按设置间隔限速）…", unit))
 	}
-	rep, dirs, err := runAudit(scanCtx, s.files, req, required, unit, checkSeasons || checkEpisodes, progress)
+	rep, dirs, err := runAudit(scanCtx, s.files, req, required, unit, auditRunOptions{
+		CollectEpisodes: checkSeasons || checkEpisodes,
+		SkipTags:        !checkMedia,
+		SkipMixedExt:    !checkMedia,
+	}, progress)
 	if err != nil {
 		return nil, err
 	}
@@ -368,8 +375,15 @@ func (s *Service) runAuditReport(ctx context.Context, req AuditRequest, progress
 }
 
 // runAudit 拉树并判定，供 RunAudit 与单测共用。
+// auditRunOptions 是取树后判定阶段的开关。
+type auditRunOptions struct {
+	CollectEpisodes bool
+	SkipTags        bool
+	SkipMixedExt    bool
+}
+
 func runAudit(ctx context.Context, lister auditLister, req AuditRequest, required []string, unit string,
-	collectEpisodes bool, progress func(string)) (audit.Report, int, error) {
+	opts auditRunOptions, progress func(string)) (audit.Report, int, error) {
 	tree, dirs, err := buildAuditTree(ctx, lister, req.AccountID, req.RootID, req.RootName, progress)
 	if err != nil {
 		return audit.Report{}, dirs, err
@@ -378,7 +392,9 @@ func runAudit(ctx context.Context, lister auditLister, req AuditRequest, require
 		Required:        required,
 		Unit:            unit,
 		Exts:            req.Exts,
-		CollectEpisodes: collectEpisodes,
+		CollectEpisodes: opts.CollectEpisodes,
+		SkipTags:        opts.SkipTags,
+		SkipMixedExt:    opts.SkipMixedExt,
 	}), dirs, nil
 }
 

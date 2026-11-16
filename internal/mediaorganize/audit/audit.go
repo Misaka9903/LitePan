@@ -43,6 +43,10 @@ type Options struct {
 	Unit string
 	// CollectEpisodes 为 true 时顺带收集每季的集号（供剧集完整性比对用），不产生额外请求。
 	CollectEpisodes bool
+	// SkipTags 为 true 时不做媒体信息（分辨率/编码）判定。
+	SkipTags bool
+	// SkipMixedExt 为 true 时不做扩展名一致性判定。
+	SkipMixedExt bool
 }
 
 // Bucket 是同一目录、同一扩展名的一组同源文件，一季通常是一个桶。
@@ -133,7 +137,7 @@ func Run(root Node, opts Options) Report {
 	walk(root, "", func(path string, dir Node) {
 		ids[path] = dir.ID
 	}, func(path string, dir Node, files []Node) {
-		buckets, mixedExt := judgeDir(path, dir.ID, files, required, exts)
+		buckets, mixedExt := judgeDir(path, dir.ID, files, required, exts, opts.SkipTags, opts.SkipMixedExt)
 		seasonFallback := 0
 		if n := rules.ParseSeasonDirNumber(dir.Name); n != nil {
 			seasonFallback = *n
@@ -263,7 +267,8 @@ func walk(n Node, prefix string, onDir func(path string, dir Node), fn func(path
 }
 
 // judgeDir 把一个目录里的文件按扩展名分桶并判定。
-func judgeDir(path, dirID string, files []Node, required []string, exts map[string]struct{}) ([]Bucket, bool) {
+func judgeDir(path, dirID string, files []Node, required []string, exts map[string]struct{},
+	skipTags, skipMixedExt bool) ([]Bucket, bool) {
 	byExt := map[string][]Node{}
 	for _, f := range files {
 		ext := strings.ToLower(extOf(f.Name))
@@ -275,7 +280,7 @@ func judgeDir(path, dirID string, files []Node, required []string, exts map[stri
 	if len(byExt) == 0 {
 		return nil, false
 	}
-	mixedExt := len(byExt) > 1
+	mixedExt := len(byExt) > 1 && !skipMixedExt
 	extNames := make([]string, 0, len(byExt))
 	for e := range byExt {
 		extNames = append(extNames, e)
@@ -299,6 +304,9 @@ func judgeDir(path, dirID string, files []Node, required []string, exts map[stri
 				continue
 			}
 			scored = append(scored, f)
+		}
+		if skipTags {
+			scored = nil
 		}
 		b.Total = len(scored)
 

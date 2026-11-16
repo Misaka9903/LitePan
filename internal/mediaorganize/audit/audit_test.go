@@ -320,3 +320,26 @@ func TestRunAllMissingCountsAsTotal(t *testing.T) {
 		t.Fatalf("整季缺集数 = %d / 总 %d, 期望 2 / 2", g.MissingFiles["screen_size"], g.MissingTotal)
 	}
 }
+
+// 关掉「媒体信息」时，标签缺失与扩展名混用都不再判定。
+func TestRunSkipTagsAndMixedExt(t *testing.T) {
+	root := dir("韩剧", "root",
+		dir("没标签的剧 (2020) {tmdb-9}", "s",
+			dir("Season 01", "s1",
+				file("剧 (2020) S01E01.mkv", 10),
+				file("剧 (2020) S01E02.mp4", 10),
+			),
+		),
+	)
+	on := Run(root, Options{Required: []string{"screen_size", "video_codec"}})
+	if on.BadGroups != 1 {
+		t.Fatalf("开启时应判不合格，实际 %d", on.BadGroups)
+	}
+	off := Run(root, Options{Required: []string{"screen_size", "video_codec"}, SkipTags: true, SkipMixedExt: true})
+	if off.BadGroups != 0 {
+		t.Fatalf("全部跳过时不该判不合格: %+v", off.Groups)
+	}
+	if len(off.Groups[0].Missing) != 0 || off.Groups[0].MixedExt {
+		t.Fatalf("跳过标记没生效: missing=%v mixedExt=%v", off.Groups[0].Missing, off.Groups[0].MixedExt)
+	}
+}
