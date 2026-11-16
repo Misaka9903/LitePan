@@ -347,7 +347,7 @@ export interface MediaAuditGroup {
   /** TMDB 完整性比对；未开启或未匹配时为空 */
   tmdb_id?: string;
   media_type?: "tv" | "movie";
-  match?: "matched" | "unmatched" | "failed";
+  match?: "matched" | "unmatched" | "failed" | "unparsed";
   completeness?: MediaAuditCompleteness;
   franchise?: MediaAuditFranchise;
 }

@@ -19,6 +19,8 @@ import (
 const (
 	// tmdbCacheTTL 是进程内 TMDB 结果缓存的有效期；同一份库一天内重复体检几乎零请求。
 	tmdbCacheTTL = 12 * time.Hour
+	// tmdbCacheMax 限制缓存条数，防止长期运行的实例被大库撑爆内存。
+	tmdbCacheMax = 4000
 	// franchiseEnrichMax 限制每个合集额外查详情的部数（补 runtime 用于判断重剪版）。
 	// 实测《鬼灭之刃（系列）》有 13 部候选，8 部不够用。
 	franchiseEnrichMax = 20
@@ -141,19 +143,16 @@ func (f *tmdbFetcher) collection(id string) (name string, parts []audit.Franchis
 
 // movieInfo 是电影 detail 里完整性比对用到的字段。
 type movieInfo struct {
-	Title         string
-	ReleaseDate   string
-	Runtime       int
-	CollectionID  string
-	CollectionNm  string
-	OriginalTitle string
+	Title        string
+	ReleaseDate  string
+	Runtime      int
+	CollectionID string
 }
 
 func parseMovieInfo(m map[string]any) movieInfo {
 	out := movieInfo{
-		Title:         jsonString(m["title"]),
-		ReleaseDate:   jsonString(m["release_date"]),
-		OriginalTitle: jsonString(m["original_title"]),
+		Title:       jsonString(m["title"]),
+		ReleaseDate: jsonString(m["release_date"]),
 	}
 	if n := rules.AsFirstInt(m["runtime"]); n != nil {
 		out.Runtime = *n
@@ -161,7 +160,6 @@ func parseMovieInfo(m map[string]any) movieInfo {
 	if col, ok := m["belongs_to_collection"].(map[string]any); ok {
 		if id := rules.AsFirstInt(col["id"]); id != nil && *id > 0 {
 			out.CollectionID = fmt.Sprint(*id)
-			out.CollectionNm = strings.TrimSpace(fmt.Sprint(col["name"]))
 		}
 	}
 	return out
@@ -262,6 +260,13 @@ func (s *Service) fillShowDiff(f *tmdbFetcher, g *audit.Group, detail map[string
 	if len(seasons) == 0 {
 		return
 	}
+	// 本地一个季号都解析不出来时不能断定「整部剧一季都没有」：
+	// 常见于文件名不带 SxxExx、也没有 Season 目录的剧（整理前的素材）。
+	// 这种情况只标「未识别季集」，不报缺季，否则会把所有季都列成缺失。
+	if len(g.Episodes) == 0 {
+		g.Match = "unparsed"
+		return
+	}
 	if !opts.Episodes || len(g.Episodes) == 0 {
 		if opts.Seasons {
 			diff := audit.CompareSeasons(g.Episodes, seasons, today)
@@ -352,6 +357,14 @@ func (s *Service) fillFranchises(f *tmdbFetcher, rep *audit.Report, byCollection
 // 用于区分正片续集和重剪/合集版（合集接口本身不带 runtime）。
 func enrichMissingParts(f *tmdbFetcher, parts []audit.FranchisePart, local map[string]audit.FranchisePart, today time.Time) {
 	todayStr := today.Format("2006-01-02")
+	// 只有「晚于本地全部作品」的 part 才需要 runtime（用来判重剪/合集版）；
+	// 更早的属于前传判定、夹在中间的必然是缺，都不必多查一次详情。
+	latestLocal := ""
+	for _, lp := range local {
+		if lp.ReleaseDate != "" && lp.ReleaseDate > latestLocal {
+			latestLocal = lp.ReleaseDate
+		}
+	}
 	enriched := 0
 	for i := range parts {
 		if enriched >= franchiseEnrichMax {
@@ -362,6 +375,9 @@ func enrichMissingParts(f *tmdbFetcher, parts []audit.FranchisePart, local map[s
 			continue
 		}
 		if p.ReleaseDate == "" || p.ReleaseDate > todayStr {
+			continue
+		}
+		if latestLocal != "" && p.ReleaseDate <= latestLocal {
 			continue
 		}
 		mv, err := f.lookup(p.ID, "movie")
@@ -379,7 +395,7 @@ func enrichMissingParts(f *tmdbFetcher, parts []audit.FranchisePart, local map[s
 	}
 }
 
-var tvLikeNameRe = regexp.MustCompile(`(?i)s\d{1,2}\s*e\d{1,4}`)
+var tvLikeNameRe = regexp.MustCompile(`(?i)s\d{1,2}[\s._-]{0,2}(?:ep|e)\s?\d{1,4}`)
 
 // looksLikeTVGroup 判断分组看起来是不是剧集。
 //
@@ -436,6 +452,22 @@ func (s *Service) storeTMDB(key string, raw json.RawMessage) {
 		s.tmdbCache = map[string]tmdbCacheEntry{}
 	}
 	s.tmdbCache[key] = tmdbCacheEntry{raw: raw, at: time.Now()}
+	if len(s.tmdbCache) <= tmdbCacheMax {
+		return
+	}
+	// 超限时丢掉最旧的四分之一，避免每次写入都做全量排序。
+	type kv struct {
+		key string
+		at  time.Time
+	}
+	entries := make([]kv, 0, len(s.tmdbCache))
+	for k, v := range s.tmdbCache {
+		entries = append(entries, kv{k, v.at})
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].at.Before(entries[j].at) })
+	for i := 0; i < len(entries)/4; i++ {
+		delete(s.tmdbCache, entries[i].key)
+	}
 }
 
 // jsonString 取 JSON 里的字符串字段，缺失或类型不对返回空串。

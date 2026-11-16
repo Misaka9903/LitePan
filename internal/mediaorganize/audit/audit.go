@@ -99,20 +99,6 @@ type Group struct {
 // Complete 报告该组是否包含 TMDB 比对结论。
 func (g Group) Complete() bool { return g.Completeness != nil || g.Franchise != nil }
 
-// Bad 表示该组有任何需要处理的问题（信息缺失、扩展名混用、缺季缺集、缺续集）。
-func (g Group) Bad() bool {
-	if !g.OK() {
-		return true
-	}
-	if g.Completeness != nil && g.Completeness.Bad() {
-		return true
-	}
-	if g.Franchise != nil && g.Franchise.Bad() {
-		return true
-	}
-	return false
-}
-
 // OK 表示该组信息齐全，不需要搬动。
 func (g Group) OK() bool { return len(g.Missing) == 0 && !g.MixedExt }
 

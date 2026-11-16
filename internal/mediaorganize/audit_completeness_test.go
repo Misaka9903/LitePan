@@ -313,3 +313,56 @@ func TestApplyCompletenessSeasonsOnly(t *testing.T) {
 		t.Fatalf("TMDB 调用 = %d, 期望 1（只查剧详情）", client.calls)
 	}
 }
+
+// 本地文件名既没有 SxxExx、也没有季目录时，不能把 TMDB 的每一季都报成缺失。
+func TestApplyCompletenessUnparsedLocalSeasons(t *testing.T) {
+	rep := auditRunTree(t, dirNode("韩剧", "root",
+		dirNode("无季号剧 (2021) {tmdb-500}", "g1",
+			fileNode("无季号剧 (2021) 上.mkv"),
+			fileNode("无季号剧 (2021) 下.mkv"),
+		),
+	))
+	client := &stubAuditTMDB{
+		tv: map[string]map[string]any{"500": {"seasons": []any{
+			map[string]any{"season_number": 1, "episode_count": 12, "air_date": "2021-01-01"},
+			map[string]any{"season_number": 2, "episode_count": 12, "air_date": "2023-01-01"},
+		}}},
+	}
+	(&Service{}).applyCompleteness(context.Background(), &rep, client, 0,
+		completenessOptions{Seasons: true, Episodes: true}, time.Now())
+
+	g := rep.Groups[0]
+	if g.Match != "unparsed" {
+		t.Fatalf("应标记为未识别季集，实际 match=%q", g.Match)
+	}
+	if g.Completeness != nil {
+		t.Fatalf("不该给出缺季结论: %+v", g.Completeness.MissingSeasons)
+	}
+}
+
+// 只给「晚于本地全部作品」的 part 补详情：更早的（前传判定）与夹在中间的都不必查。
+func TestEnrichMissingPartsOnlyForLaterParts(t *testing.T) {
+	rep := auditRunTree(t, dirNode("电影", "root",
+		dirNode("完结篇 (2019) {tmdb-300}", "m1", fileNode("完结篇 (2019) [2160p].mkv")),
+	))
+	client := &stubAuditTMDB{
+		movie: map[string]map[string]any{
+			"300": {"id": 300, "title": "完结篇", "release_date": "2019-01-01", "runtime": 120,
+				"belongs_to_collection": map[string]any{"id": 77, "name": "某系列"}},
+		},
+		collections: map[string]map[string]any{
+			"77": {"id": 77, "name": "某系列", "parts": []any{
+				map[string]any{"id": 100, "title": "第一部", "release_date": "2013-01-01"},
+				map[string]any{"id": 200, "title": "第二部", "release_date": "2016-01-01"},
+				map[string]any{"id": 300, "title": "完结篇", "release_date": "2019-01-01"},
+			}},
+		},
+	}
+	(&Service{}).applyCompleteness(context.Background(), &rep, client, 0,
+		completenessOptions{Seasons: true, Episodes: true, Franchise: true}, time.Now())
+
+	// 1 次电影详情 + 1 次合集；两部更早的 part 不再逐个查详情
+	if client.calls != 2 {
+		t.Fatalf("TMDB 调用 = %d, 期望 2（不额外 enrich 更早的续集）", client.calls)
+	}
+}

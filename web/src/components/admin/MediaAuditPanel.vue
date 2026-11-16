@@ -65,15 +65,31 @@ function isPartialMissing(group: MediaAuditGroup, key: string) {
   return miss > 0 && miss < (group.missing_total ?? 0);
 }
 
-/** 每个缺失标签点上去能看到的解释 */
+function lastSegment(path?: string) {
+  if (!path) {
+    return "";
+  }
+  const parts = path.split("/").filter(Boolean);
+  return parts[parts.length - 1] ?? "";
+}
+
+/** 每个缺失标签点上去能看到的解释（多季时按季拆开） */
 function missingHint(group: MediaAuditGroup, key: string) {
   const label = labelOf(key);
-  const miss = missingFiles(group, key);
-  const total = group.missing_total ?? 0;
-  if (miss > 0 && total > 0 && miss < total) {
-    return `${total} 集里有 ${miss} 集的文件名解析不出${label}，整理后这些集的名字会缺这一段`;
+  const perSeason = (group.seasons ?? [])
+    .map((s) => ({ name: lastSegment(s.dir_path), miss: s.missing_files?.[key] ?? 0, total: s.total ?? 0 }))
+    .filter((x) => x.miss > 0);
+  if (perSeason.length === 0) {
+    return `文件名里解析不出${label}`;
   }
-  return `整季的文件名都解析不出${label}（整理后这一季都没有这一段）`;
+  if (perSeason.length === 1) {
+    const only = perSeason[0];
+    return only.miss >= only.total
+      ? `整季（${only.total} 集）都解析不出${label}，整理后这一季都没有这一段`
+      : `${only.total} 集里有 ${only.miss} 集解析不出${label}，整理后这些集的名字会缺这一段`;
+  }
+  const detail = perSeason.map((x) => `${x.name} ${x.miss}/${x.total}`).join("；");
+  return `${detail} 解析不出${label}`;
 }
 
 function openPicker() {
@@ -249,7 +265,7 @@ function exportCsv() {
     return;
   }
   const lines = [
-    "作品,路径,目录,样本文件,文件数,体积(字节),缺失,标签混合,扩展名混用,TMDB,匹配,缺失季,缺失集,多余集,缺续集",
+    "作品,路径,目录,样本文件,文件数,体积(字节),缺失,缺失集数,标签混合,扩展名混用,TMDB,匹配,缺失季,缺失集,多余集,缺续集",
   ];
   for (const g of data.groups) {
     const group = normalizeGroup(g);
@@ -276,6 +292,13 @@ function exportCsv() {
           String(s.files),
           String(s.bytes),
           s.missing.map(labelOf).join("+"),
+          (s.missing ?? [])
+            .map((k) => {
+              const miss = s.missing_files?.[k] ?? 0;
+              const total = s.total ?? 0;
+              return miss > 0 && total > 0 ? `${labelOf(k)} ${miss}/${total}` : labelOf(k);
+            })
+            .join("+"),
           s.mixed ? "是" : "",
           g.mixed_ext ? "是" : "",
           g.tmdb_id ? `tmdb-${g.tmdb_id}` : "",
@@ -505,6 +528,11 @@ onMounted(async () => {
                 <span v-for="p in group.franchise.optional" :key="`opt-${p.id}`" class="audit-badge audit-badge--warn" :title="p.reason ?? ''">可选 {{ p.title }}</span>
                 <span v-if="group.franchise.upcoming.length" class="audit-ok">待上映 {{ group.franchise.upcoming.length }}</span>
               </template>
+              <span
+                v-else-if="group.match === 'unparsed'"
+                class="audit-badge audit-badge--warn"
+                title="文件名里既没有 SxxExx，所在目录也不是季目录，无法判断本地有哪几季"
+              >未识别季集</span>
               <span v-else-if="group.match === 'unmatched'" class="audit-badge audit-badge--warn">未匹配</span>
               <span v-else-if="group.match === 'failed'" class="audit-badge audit-badge--warn">查询失败</span>
               <span v-else class="audit-ok">—</span>
