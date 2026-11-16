@@ -226,7 +226,7 @@ func (s *Service) applyCompleteness(ctx context.Context, rep *audit.Report, clie
 		if err != nil || mv == nil {
 			g.Match = "failed"
 			if s != nil && s.log != nil {
-				s.log.Warn("信息体检：TMDB 查询失败", "group", g.Name, "tmdb_id", g.TMDBID, "err", err)
+				s.log.Warn("片库体检：TMDB 查询失败", "group", g.Name, "tmdb_id", g.TMDBID, "err", err)
 			}
 			continue
 		}
