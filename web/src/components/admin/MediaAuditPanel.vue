@@ -117,10 +117,12 @@ function normalizeGroup(group: MediaAuditGroup): MediaAuditGroup {
 }
 
 /** 缺集（排除「编号差异」这种只提示的） */
-function missingEpisodes(group: MediaAuditGroup): { season: number; eps: number[]; unknown: boolean }[] {
+function missingEpisodes(
+  group: MediaAuditGroup,
+): { season: number; eps: number[]; unknown: boolean; local: number; aired: number }[] {
   return (group.completeness?.seasons ?? [])
     .filter((s) => s.missing.length > 0)
-    .map((s) => ({ season: s.season, eps: s.missing, unknown: s.unknown }));
+    .map((s) => ({ season: s.season, eps: s.missing, unknown: s.unknown, local: s.local, aired: s.aired }));
 }
 
 function airingSeasons(group: MediaAuditGroup) {
@@ -221,7 +223,11 @@ function exportCsv() {
     const group = normalizeGroup(g);
     const missSeasons = (group.completeness?.missing_seasons ?? []).map((n) => `S${pad2(n)}`).join("+");
     const missEpisodes = missingEpisodes(group)
-      .map((m) => `S${pad2(m.season)}:${m.eps.map((e) => `E${pad2(e)}`).join("、")}${m.unknown ? "(疑似编号差异)" : ""}`)
+      .map((m) =>
+        m.unknown
+          ? `S${pad2(m.season)}:编号差异(本地${m.local}集/TMDB${m.aired}集)`
+          : `S${pad2(m.season)}:${m.eps.map((e) => `E${pad2(e)}`).join("、")}`,
+      )
       .join(" | ");
     const extraEpisodes = (group.completeness?.seasons ?? [])
       .filter((s) => s.extra.length > 0)
@@ -398,8 +404,11 @@ onMounted(() => {
                   v-for="m in missingEpisodes(group)"
                   :key="`me-${m.season}`"
                   :class="m.unknown ? 'audit-badge audit-badge--warn' : 'audit-badge'"
-                  :title="m.unknown ? '本地集号与 TMDB 对不上，需人工确认' : ''"
-                >S{{ pad2(m.season) }} 缺 {{ episodeList(m.eps) }}</span>
+                  :title="m.unknown ? `本地 ${m.local} 集 / TMDB ${m.aired} 集，集号对不上，需人工确认` : ''"
+                >
+                  <template v-if="m.unknown">S{{ pad2(m.season) }} 编号差异</template>
+                  <template v-else>S{{ pad2(m.season) }} 缺 {{ episodeList(m.eps) }}</template>
+                </span>
                 <span
                   v-for="s in airingSeasons(group)"
                   :key="`air-${s.season}`"

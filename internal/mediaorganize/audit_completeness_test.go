@@ -227,3 +227,31 @@ func dirNode(name, id string, kids ...audit.Node) audit.Node {
 func fileNode(name string) audit.Node {
 	return audit.Node{Name: name, Size: 100}
 }
+
+// 回归：电影库里的 id 常常也能撞上一个无关的剧（TMDB 剧/电影是两套 ID 空间）。
+// 目录里只有单个正片文件时必须按电影处理，不能拿剧的季集去比。
+func TestApplyCompletenessMovieWithCollidingTVID(t *testing.T) {
+	rep := auditRunTree(t, dirNode("电影", "root",
+		dirNode("三十极夜 (2007) {tmdb-4513}", "m1",
+			fileNode("三十极夜 (2007) [2160p].mkv"),
+		),
+	))
+	client := &stubAuditTMDB{
+		// id 4513 同时存在于剧与电影（真实情况），剧那边是一堆无关的集号
+		tv: map[string]map[string]any{"4513": {"id": 4513, "seasons": []any{
+			map[string]any{"season_number": 1, "episode_count": 22, "air_date": "2010-01-01"},
+		}}},
+		seasons: map[string]map[int][]map[string]any{"4513": {1: episodeList(1, 2, 3, 4, 5)}},
+		movie: map[string]map[string]any{"4513": {"id": 4513, "title": "三十极夜",
+			"release_date": "2007-10-17", "runtime": 113}},
+	}
+	(&Service{}).applyCompleteness(context.Background(), &rep, client, 0, true, true, time.Now())
+
+	g := rep.Groups[0]
+	if g.MediaType != "movie" {
+		t.Fatalf("电影被当成剧: type=%q", g.MediaType)
+	}
+	if g.Completeness != nil {
+		t.Fatalf("电影不该有季集结论: %+v", g.Completeness)
+	}
+}

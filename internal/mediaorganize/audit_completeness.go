@@ -191,16 +191,32 @@ func (s *Service) applyCompleteness(ctx context.Context, rep *audit.Report, clie
 			}
 			continue
 		}
-		// 先按剧查；查不到再按电影查（作品目录里嵌套的剧场版属于这种情况）。
-		if tv, err := f.lookup(g.TMDBID, "tv"); err == nil && tv != nil {
-			g.MediaType = "tv"
-			g.Match = "matched"
-			if checkEpisodes {
-				s.fillShowDiff(f, g, tv, today)
+		// 先按目录内容判断是剧还是电影，再去对应的 TMDB 接口。
+		// 不能「先查 tv、成功就算剧」：TMDB 的剧和电影是两套独立 ID 空间，
+		// 电影库里的 id 往往也能撞上一个同名无关的剧，那样会把电影当成一季剧去比集号。
+		tvFirst := looksLikeTVGroup(*g)
+		if tvFirst {
+			if tv, err := f.lookup(g.TMDBID, "tv"); err == nil && tv != nil {
+				g.MediaType = "tv"
+				g.Match = "matched"
+				if checkEpisodes {
+					s.fillShowDiff(f, g, tv, today)
+				}
+				continue
 			}
-			continue
 		}
 		mv, err := f.lookup(g.TMDBID, "movie")
+		if (err != nil || mv == nil) && !tvFirst {
+			// 目录看着不像剧，但电影也查不到：再给 tv 一次机会（无季目录的番剧/剧集）。
+			if tv, terr := f.lookup(g.TMDBID, "tv"); terr == nil && tv != nil {
+				g.MediaType = "tv"
+				g.Match = "matched"
+				if checkEpisodes {
+					s.fillShowDiff(f, g, tv, today)
+				}
+				continue
+			}
+		}
 		if err != nil || mv == nil {
 			g.Match = "failed"
 			continue
