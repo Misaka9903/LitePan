@@ -355,11 +355,11 @@ func enrichMissingParts(f *tmdbFetcher, parts []audit.FranchisePart, local map[s
 
 var tvLikeNameRe = regexp.MustCompile(`(?i)s\d{1,2}\s*e\d{1,4}`)
 
-// looksLikeTVGroup 判断未匹配的分组看起来是不是剧集（避免把无名电影目录报成未匹配）。
+// looksLikeTVGroup 判断分组看起来是不是剧集。
+//
+// 只看文件名里的 SxxExx 与季目录名，不用 ParsedMedia：解析器会把
+// 《杀死比尔2》《疾速追杀2》这类片名里的序号当成集号，据此判剧会误伤电影。
 func looksLikeTVGroup(g audit.Group) bool {
-	if len(g.Episodes) > 0 {
-		return true
-	}
 	for _, b := range g.Buckets {
 		if tvLikeNameRe.MatchString(b.Sample) {
 			return true

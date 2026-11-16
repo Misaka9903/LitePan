@@ -255,3 +255,23 @@ func TestApplyCompletenessMovieWithCollidingTVID(t *testing.T) {
 		t.Fatalf("电影不该有季集结论: %+v", g.Completeness)
 	}
 }
+
+// 回归：《杀死比尔2》这类片名带序号的电影，不能被解析出的「集号」判成剧。
+func TestApplyCompletenessMovieWithNumberInName(t *testing.T) {
+	rep := auditRunTree(t, dirNode("电影", "root",
+		dirNode("杀死比尔2 (2004) {tmdb-393}", "m1",
+			fileNode("杀死比尔2 (2004) [2160p].mkv"),
+		),
+	))
+	client := &stubAuditTMDB{
+		tv: map[string]map[string]any{"393": {"seasons": []any{
+			map[string]any{"season_number": 1, "episode_count": 14, "air_date": "2010-01-01"},
+		}}},
+		seasons: map[string]map[int][]map[string]any{"393": {1: episodeList(1, 2, 3)}},
+		movie:   map[string]map[string]any{"393": {"id": 393, "title": "杀死比尔2", "release_date": "2004-04-16", "runtime": 137}},
+	}
+	(&Service{}).applyCompleteness(context.Background(), &rep, client, 0, true, true, time.Now())
+	if g := rep.Groups[0]; g.MediaType != "movie" || g.Completeness != nil {
+		t.Fatalf("应按电影处理: type=%q completeness=%+v", g.MediaType, g.Completeness)
+	}
+}
