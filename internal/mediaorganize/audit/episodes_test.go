@@ -217,3 +217,21 @@ func TestRunGroupsByTMDBTaggedDir(t *testing.T) {
 		t.Fatalf("进击的巨人集号不对: %+v", atk.Episodes)
 	}
 }
+
+// 直接选中某一部作品当扫描根时，整棵树都属于它，不该拆成一堆「未匹配」的分组。
+func TestRunSingleShowRootWithTag(t *testing.T) {
+	root := dir("进击的巨人 (2013) {tmdb-1429}", "root",
+		dir("Season 1", "s1", file("Attack on Titan.2013.S01E01.2160p.mkv", 100)),
+		dir("Season 2", "s2", file("Attack on Titan.2013.S02E01.2160p.mkv", 100)),
+		dir("进击的巨人 完结篇（前篇） (2023) {tmdbid-313024}", "m1",
+			file("进击的巨人 完结篇（前篇） (2023).mkv", 200)),
+	)
+	rep := Run(root, Options{Required: []string{"screen_size"}, CollectEpisodes: true})
+	if rep.TotalGroups != 1 {
+		t.Fatalf("分组数 = %d, 期望 1", rep.TotalGroups)
+	}
+	g := rep.Groups[0]
+	if g.Name != "进击的巨人 (2013) {tmdb-1429}" || len(g.Episodes) != 2 {
+		t.Fatalf("单部作品分组不对: name=%q episodes=%+v", g.Name, g.Episodes)
+	}
+}

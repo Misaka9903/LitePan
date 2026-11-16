@@ -134,6 +134,8 @@ func Run(root Node, opts Options) Report {
 	groups := map[string]*Group{}
 	order := make([]string, 0, 16)
 	ids := map[string]string{}
+	// 扫描根自己带着 {tmdb-xxx} 时（用户直接选了某一部作品），整棵树都属于这一部作品。
+	rootTagged := rules.FindTMDBIDInName(root.Name) != ""
 
 	walk(root, "", func(path string, dir Node) {
 		ids[path] = dir.ID
@@ -144,7 +146,7 @@ func Run(root Node, opts Options) Report {
 			seasonFallback = *n
 		}
 		for _, b := range buckets {
-			key, name, gpath := groupKey(unit, path, root.Name)
+			key, name, gpath := groupKey(unit, path, root.Name, rootTagged)
 			g, ok := groups[key]
 			if !ok {
 				g = &Group{ID: ids[gpath], Name: name, Path: gpath}
@@ -167,7 +169,7 @@ func Run(root Node, opts Options) Report {
 			g.Missing = mergeKeys(g.Missing, b.Missing)
 		}
 		if opts.CollectEpisodes && len(buckets) > 0 {
-			key, _, _ := groupKey(unit, path, root.Name)
+			key, _, _ := groupKey(unit, path, root.Name, rootTagged)
 			if g, ok := groups[key]; ok {
 				collectEpisodes(g, files, exts, seasonFallback)
 			}
@@ -345,13 +347,17 @@ func signature(tags map[string]any, required []string) string {
 }
 
 // groupKey 返回归集键、显示名和路径。
-func groupKey(unit, path, rootName string) (key, name, gpath string) {
+func groupKey(unit, path, rootName string, rootTagged bool) (key, name, gpath string) {
 	path = strings.Trim(path, "/")
-	if unit == "season" || path == "" {
+	if unit == "season" {
 		if path == "" {
 			return "\x00root", rootName, ""
 		}
 		return "d:" + path, path, path
+	}
+	if path == "" || rootTagged {
+		// 根目录自己就是一部作品（用户直接选了某部剧/电影）时，整棵树归它。
+		return "\x00root", rootName, ""
 	}
 	gp := showGroupPath(path)
 	segs := strings.Split(gp, "/")
