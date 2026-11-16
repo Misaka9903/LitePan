@@ -30,6 +30,8 @@ const scanning = ref(false);
 const report = ref<MediaAuditReport | null>(null);
 const onlyBad = ref(true);
 const unit = ref<"show" | "season">("show");
+const checkEpisodes = ref(true);
+const checkFranchise = ref(true);
 
 const missingLabels: Record<string, string> = {
   screen_size: "分辨率",
@@ -67,6 +69,8 @@ async function startAudit() {
       root_id: rootId.value,
       root_name: rootName.value,
       unit: unit.value,
+      check_episodes: checkEpisodes.value,
+      check_franchise: checkFranchise.value,
     });
     report.value = data;
     if (data.summary.bad_groups === 0) {
@@ -82,17 +86,71 @@ async function startAudit() {
 }
 
 function normalizeGroup(group: MediaAuditGroup): MediaAuditGroup {
+  const completeness = group.completeness
+    ? {
+        ...group.completeness,
+        seasons: (group.completeness.seasons ?? []).map((s) => ({
+          ...s,
+          missing: s.missing ?? [],
+          extra: s.extra ?? [],
+        })),
+        missing_seasons: group.completeness.missing_seasons ?? [],
+      }
+    : undefined;
+  const franchise = group.franchise
+    ? {
+        ...group.franchise,
+        local: group.franchise.local ?? [],
+        missing: group.franchise.missing ?? [],
+        optional: group.franchise.optional ?? [],
+        upcoming: group.franchise.upcoming ?? [],
+      }
+    : undefined;
   return {
     ...group,
     missing: group.missing ?? [],
     mixed_ext: group.mixed_ext ?? false,
     seasons: (group.seasons ?? []).map((s) => ({ ...s, missing: s.missing ?? [] })),
+    completeness,
+    franchise,
   };
+}
+
+/** 缺集（排除「编号差异」这种只提示的） */
+function missingEpisodes(group: MediaAuditGroup): { season: number; eps: number[]; unknown: boolean }[] {
+  return (group.completeness?.seasons ?? [])
+    .filter((s) => s.missing.length > 0)
+    .map((s) => ({ season: s.season, eps: s.missing, unknown: s.unknown }));
+}
+
+function airingSeasons(group: MediaAuditGroup) {
+  return (group.completeness?.seasons ?? []).filter((s) => s.airing);
+}
+
+function isBad(group: MediaAuditGroup) {
+  if (!group.ok) {
+    return true;
+  }
+  if ((group.completeness?.missing_seasons?.length ?? 0) > 0) {
+    return true;
+  }
+  if (missingEpisodes(group).some((m) => !m.unknown)) {
+    return true;
+  }
+  return (group.franchise?.missing?.length ?? 0) > 0;
+}
+
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
+}
+
+function episodeList(eps: number[]) {
+  return eps.map((e) => `E${pad2(e)}`).join("、");
 }
 
 const rows = computed<MediaAuditGroup[]>(() => {
   const groups = (report.value?.groups ?? []).map(normalizeGroup);
-  return onlyBad.value ? groups.filter((g) => !g.ok) : groups;
+  return onlyBad.value ? groups.filter(isBad) : groups;
 });
 
 const summary = computed(() => report.value?.summary);
@@ -156,9 +214,21 @@ function exportCsv() {
   if (!data) {
     return;
   }
-  const lines = ["作品,路径,目录,样本文件,文件数,体积(字节),缺失,标签混合,扩展名混用"];
+  const lines = [
+    "作品,路径,目录,样本文件,文件数,体积(字节),缺失,标签混合,扩展名混用,TMDB,匹配,缺失季,缺失集,多余集,缺续集",
+  ];
   for (const g of data.groups) {
-    for (const s of g.seasons) {
+    const group = normalizeGroup(g);
+    const missSeasons = (group.completeness?.missing_seasons ?? []).map((n) => `S${pad2(n)}`).join("+");
+    const missEpisodes = missingEpisodes(group)
+      .map((m) => `S${pad2(m.season)}:${m.eps.map((e) => `E${pad2(e)}`).join("、")}${m.unknown ? "(疑似编号差异)" : ""}`)
+      .join(" | ");
+    const extraEpisodes = (group.completeness?.seasons ?? [])
+      .filter((s) => s.extra.length > 0)
+      .map((s) => `S${pad2(s.season)}:${s.extra.map((e) => `E${pad2(e)}`).join("、")}`)
+      .join(" | ");
+    const missMovies = (group.franchise?.missing ?? []).map((p) => p.title).join("、");
+    for (const s of group.seasons) {
       lines.push(
         [
           g.name,
@@ -170,6 +240,12 @@ function exportCsv() {
           s.missing.map(labelOf).join("+"),
           s.mixed ? "是" : "",
           g.mixed_ext ? "是" : "",
+          g.tmdb_id ? `tmdb-${g.tmdb_id}` : "",
+          g.match === "matched" ? "已匹配" : g.match === "unmatched" ? "未匹配" : g.match === "failed" ? "查询失败" : "",
+          missSeasons,
+          missEpisodes,
+          extraEpisodes,
+          missMovies,
         ]
           .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
           .join(","),
@@ -205,6 +281,14 @@ onMounted(() => {
           <option value="season">按目录</option>
         </select>
       </label>
+      <label class="audit-unit" title="按 TMDB 季集表比对：缺哪一集、哪一季整季没收录（约 1 分钟）">
+        <input v-model="checkEpisodes" type="checkbox" />
+        查剧集缺失
+      </label>
+      <label class="audit-unit" title="按 TMDB 合集比对：这一系列还有哪部没收录">
+        <input v-model="checkFranchise" type="checkbox" />
+        查电影续集
+      </label>
       <AppButton type="button" variant="primary" :disabled="scanning" @click="startAudit">
         {{ scanning ? "扫描中…" : "开始体检" }}
       </AppButton>
@@ -219,6 +303,16 @@ onMounted(() => {
       <span>文件 <b>{{ summary.total_files }}</b></span>
       <span>不合格体积 <b>{{ formatSize(summary.bad_bytes) }}</b></span>
       <span>扫描目录 <b>{{ summary.scanned_dirs }}</b></span>
+      <span v-if="(summary.missing_seasons ?? 0) > 0" class="audit-summary__bad">
+        缺季 <b>{{ summary.missing_seasons }}</b>
+      </span>
+      <span v-if="(summary.missing_episodes ?? 0) > 0" class="audit-summary__bad">
+        缺集 <b>{{ summary.missing_episodes }}</b>
+      </span>
+      <span v-if="(summary.missing_movies ?? 0) > 0" class="audit-summary__bad">
+        缺续集 <b>{{ summary.missing_movies }}</b>
+      </span>
+      <span v-if="(summary.unmatched_groups ?? 0) > 0">未匹配 <b>{{ summary.unmatched_groups }}</b></span>
       <label class="audit-filter">
         <input v-model="onlyBad" type="checkbox" />
         只看不合格
@@ -275,6 +369,7 @@ onMounted(() => {
             <th class="audit-table__season-col">目录</th>
             <th>样本文件</th>
             <th class="audit-table__missing-col">缺失</th>
+            <th class="audit-table__complete-col">季集 / 合集</th>
             <th class="audit-table__num-col">文件</th>
             <th class="audit-table__num-col">体积</th>
           </tr>
@@ -291,6 +386,40 @@ onMounted(() => {
               <span v-for="key in group.missing ?? []" :key="key" class="audit-badge">{{ labelOf(key) }}</span>
               <span v-if="group.mixed_ext" class="audit-badge audit-badge--warn">扩展名混用</span>
               <span v-if="!(group.missing ?? []).length && !group.mixed_ext" class="audit-ok">齐全</span>
+            </td>
+            <td class="audit-table__complete-col">
+              <template v-if="group.completeness">
+                <span
+                  v-for="n in group.completeness.missing_seasons"
+                  :key="`ms-${n}`"
+                  class="audit-badge"
+                >缺 S{{ pad2(n) }}</span>
+                <span
+                  v-for="m in missingEpisodes(group)"
+                  :key="`me-${m.season}`"
+                  :class="m.unknown ? 'audit-badge audit-badge--warn' : 'audit-badge'"
+                  :title="m.unknown ? '本地集号与 TMDB 对不上，需人工确认' : ''"
+                >S{{ pad2(m.season) }} 缺 {{ episodeList(m.eps) }}</span>
+                <span
+                  v-for="s in airingSeasons(group)"
+                  :key="`air-${s.season}`"
+                  class="audit-ok"
+                >S{{ pad2(s.season) }} 在播 {{ s.aired }}/{{ s.total }}</span>
+                <span
+                  v-if="!group.completeness.missing_seasons.length && !missingEpisodes(group).length"
+                  class="audit-ok"
+                >季集齐全</span>
+                <span v-if="group.completeness.unreliable" class="audit-badge audit-badge--warn">编号差异</span>
+              </template>
+              <template v-else-if="group.franchise">
+                <span v-if="!group.franchise.missing.length" class="audit-ok">合集齐 {{ group.franchise.local.length }}/{{ group.franchise.parts }}</span>
+                <span v-else class="audit-badge">缺 {{ group.franchise.missing.map((p) => p.title).join('、') }}</span>
+                <span v-for="p in group.franchise.optional" :key="`opt-${p.id}`" class="audit-badge audit-badge--warn" :title="p.reason ?? ''">可选 {{ p.title }}</span>
+                <span v-if="group.franchise.upcoming.length" class="audit-ok">待上映 {{ group.franchise.upcoming.length }}</span>
+              </template>
+              <span v-else-if="group.match === 'unmatched'" class="audit-badge audit-badge--warn">未匹配</span>
+              <span v-else-if="group.match === 'failed'" class="audit-badge audit-badge--warn">查询失败</span>
+              <span v-else class="audit-ok">—</span>
             </td>
             <td class="audit-table__num-col">{{ group.files }}</td>
             <td class="audit-table__num-col">{{ formatSize(group.bytes) }}</td>
@@ -417,6 +546,15 @@ onMounted(() => {
 
 .audit-table__missing-col {
   width: 200px;
+}
+
+.audit-table__complete-col {
+  min-width: 220px;
+}
+
+.audit-table__complete-col .audit-ok {
+  display: inline-block;
+  margin-right: 8px;
 }
 
 .audit-name {

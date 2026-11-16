@@ -40,7 +40,7 @@ func TestRunAuditShowUnit(t *testing.T) {
 	}}
 	rep, dirs, err := runAudit(context.Background(), lister, AuditRequest{
 		RootID: "root", RootName: "韩剧",
-	}, []string{"screen_size", "video_codec", "audio_codec"}, auditUnitShow)
+	}, []string{"screen_size", "video_codec", "audio_codec"}, auditUnitShow, false)
 	if err != nil {
 		t.Fatalf("runAudit: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestRunAuditAnySeasonBadRollsUp(t *testing.T) {
 		"s2":   {{ID: "f2", Name: "两季剧 (2017) S02E01 [1080p AAC].mkv"}},
 	}}
 	rep, _, err := runAudit(context.Background(), lister, AuditRequest{RootID: "root", RootName: "韩剧"},
-		[]string{"video_codec", "audio_codec"}, auditUnitShow)
+		[]string{"video_codec", "audio_codec"}, auditUnitShow, false)
 	if err != nil {
 		t.Fatalf("runAudit: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestRunAuditAnySeasonBadRollsUp(t *testing.T) {
 func TestRunAuditListError(t *testing.T) {
 	lister := &fakeAuditLister{listErr: errors.New("网盘超时")}
 	if _, _, err := runAudit(context.Background(), lister, AuditRequest{RootID: "root", RootName: "x"},
-		[]string{"video_codec"}, auditUnitShow); err == nil {
+		[]string{"video_codec"}, auditUnitShow, false); err == nil {
 		t.Fatalf("列表失败应整次报错")
 	}
 }
@@ -144,7 +144,7 @@ func TestTreeFromFullFilesShowStructure(t *testing.T) {
 		},
 	}
 	rep, dirs, err := runAudit(context.Background(), f, AuditRequest{RootID: "root", RootName: "韩剧"},
-		[]string{"video_codec", "audio_codec"}, auditUnitShow)
+		[]string{"video_codec", "audio_codec"}, auditUnitShow, false)
 	if err != nil {
 		t.Fatalf("runAudit: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestTreeFromFullFilesMovieStructure(t *testing.T) {
 		},
 	}
 	rep, dirs, err := runAudit(context.Background(), f, AuditRequest{RootID: "root", RootName: "电影"},
-		[]string{"screen_size", "video_codec", "audio_codec"}, auditUnitShow)
+		[]string{"screen_size", "video_codec", "audio_codec"}, auditUnitShow, false)
 	if err != nil {
 		t.Fatalf("runAudit: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestTreeFromFullFilesFallsBackWhenIncomplete(t *testing.T) {
 		t.Fatalf("文件数不匹配时应返回错误以便退回")
 	}
 	rep, _, err := runAudit(context.Background(), f, AuditRequest{RootID: "root", RootName: "韩剧"},
-		[]string{"video_codec"}, auditUnitShow)
+		[]string{"video_codec"}, auditUnitShow, false)
 	if err != nil {
 		t.Fatalf("退回后仍应成功: %v", err)
 	}

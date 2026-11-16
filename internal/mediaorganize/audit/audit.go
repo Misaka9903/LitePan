@@ -41,6 +41,8 @@ type Options struct {
 	Exts string
 	// Unit 归集粒度："show" 以根目录下一层为一组（默认），"season" 以含文件的目录各成一组。
 	Unit string
+	// CollectEpisodes 为 true 时顺带收集每季的集号（供剧集完整性比对用），不产生额外请求。
+	CollectEpisodes bool
 }
 
 // Bucket 是同一目录、同一扩展名的一组同源文件，一季通常是一个桶。
@@ -73,6 +75,35 @@ type Group struct {
 	// MixedExt 组内任一季度目录存在扩展名不一致。
 	MixedExt bool
 	Buckets  []Bucket
+	// Episodes 是「季号 → 集号」，仅在 Options.CollectEpisodes 时填充。
+	Episodes map[int][]int
+	// UnparsedEpisodes 是媒体文件里解析不出集号的个数。
+	UnparsedEpisodes int
+
+	// 以下字段由服务层在拿到 TMDB 数据后填充（audit 包只承载结果，不发请求）。
+	TMDBID    string
+	MediaType string
+	// Match 为 matched / unmatched / failed / skipped。
+	Match        string
+	Completeness *ShowDiff
+	Franchise    *CollectionDiff
+}
+
+// Complete 报告该组是否包含 TMDB 比对结论。
+func (g Group) Complete() bool { return g.Completeness != nil || g.Franchise != nil }
+
+// Bad 表示该组有任何需要处理的问题（信息缺失、扩展名混用、缺季缺集、缺续集）。
+func (g Group) Bad() bool {
+	if !g.OK() {
+		return true
+	}
+	if g.Completeness != nil && g.Completeness.Bad() {
+		return true
+	}
+	if g.Franchise != nil && g.Franchise.Bad() {
+		return true
+	}
+	return false
 }
 
 // OK 表示该组信息齐全，不需要搬动。
@@ -108,11 +139,18 @@ func Run(root Node, opts Options) Report {
 		ids[path] = dir.ID
 	}, func(path string, dir Node, files []Node) {
 		buckets, mixedExt := judgeDir(path, dir.ID, files, required, exts)
+		seasonFallback := 0
+		if n := rules.ParseSeasonDirNumber(dir.Name); n != nil {
+			seasonFallback = *n
+		}
 		for _, b := range buckets {
 			key, name, gpath := groupKey(unit, path, root.Name)
 			g, ok := groups[key]
 			if !ok {
 				g = &Group{ID: ids[gpath], Name: name, Path: gpath}
+				if opts.CollectEpisodes {
+					g.Episodes = map[int][]int{}
+				}
 				groups[key] = g
 				order = append(order, key)
 			}
@@ -128,6 +166,12 @@ func Run(root Node, opts Options) Report {
 			}
 			g.Missing = mergeKeys(g.Missing, b.Missing)
 		}
+		if opts.CollectEpisodes && len(buckets) > 0 {
+			key, _, _ := groupKey(unit, path, root.Name)
+			if g, ok := groups[key]; ok {
+				collectEpisodes(g, files, exts, seasonFallback)
+			}
+		}
 	})
 
 	rep := Report{TotalGroups: len(order)}
@@ -136,6 +180,9 @@ func Run(root Node, opts Options) Report {
 	for _, k := range order {
 		g := groups[k]
 		sort.Slice(g.Buckets, func(i, j int) bool { return g.Buckets[i].DirPath < g.Buckets[j].DirPath })
+		for season, eps := range g.Episodes {
+			g.Episodes[season] = uniqueInts(eps)
+		}
 		rep.TotalGroups = len(order)
 		rep.TotalFiles += g.Files
 		if !g.OK() {
@@ -147,6 +194,40 @@ func Run(root Node, opts Options) Report {
 	}
 	rep.Groups = csvRows
 	return rep
+}
+
+// collectEpisodes 把目录里的媒体文件解析成「季号 → 集号」，特典与 Season 0 不计。
+func collectEpisodes(g *Group, files []Node, exts map[string]struct{}, seasonFallback int) {
+	if g.Episodes == nil {
+		g.Episodes = map[int][]int{}
+	}
+	for _, f := range files {
+		ext := strings.ToLower(extOf(f.Name))
+		if _, ok := exts[ext]; !ok {
+			continue
+		}
+		ep, ok := ParseEpisode(f.Name, seasonFallback)
+		if !ok {
+			g.UnparsedEpisodes++
+			continue
+		}
+		g.Episodes[ep.Season] = append(g.Episodes[ep.Season], ep.Episode)
+	}
+}
+
+// uniqueInts 排序并去重。
+func uniqueInts(in []int) []int {
+	if len(in) == 0 {
+		return nil
+	}
+	sort.Ints(in)
+	out := in[:1]
+	for _, v := range in[1:] {
+		if v != out[len(out)-1] {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // walk 深度优先遍历。
@@ -272,11 +353,27 @@ func groupKey(unit, path, rootName string) (key, name, gpath string) {
 		}
 		return "d:" + path, path, path
 	}
-	head := path
-	if i := strings.Index(path, "/"); i >= 0 {
-		head = path[:i]
+	gp := showGroupPath(path)
+	segs := strings.Split(gp, "/")
+	return "s:" + gp, segs[len(segs)-1], gp
+}
+
+// showGroupPath 找出文件所属「作品目录」：
+// 从最深层往上找第一个带 {tmdb-xxx} / {tmdbid-xxx} 标签的祖先目录；
+// 都没有（未整理过的剧）就退回根目录下一层。
+//
+// 这样三种目录形态都能正确归组：
+//   - 韩剧/剧名 {tmdb-1}/Season 01        → 剧名目录
+//   - 动漫/鬼灭之刃（系列）/鬼灭之刃 {tmdbid-2}/Season 1 → 容器里的作品目录
+//   - 动漫/进击的巨人 {tmdb-3}/最终季 完结篇 {tmdbid-4}/ → 剧场版目录（不并进剧集）
+func showGroupPath(path string) string {
+	segs := strings.Split(path, "/")
+	for i := len(segs) - 1; i >= 0; i-- {
+		if rules.FindTMDBIDInName(segs[i]) != "" {
+			return strings.Join(segs[:i+1], "/")
+		}
 	}
-	return "s:" + head, head, head
+	return segs[0]
 }
 
 func extOf(name string) string {
@@ -341,7 +438,8 @@ func containsKey(list []string, k string) bool {
 // WriteCSV 把报告写成 CSV，一行一个桶。
 func (r Report) WriteCSV(w io.Writer) error {
 	cw := csv.NewWriter(w)
-	header := []string{"分组", "分组路径", "所在目录", "扩展名", "样本文件", "文件数", "体积", "缺失", "混合", "扩展名不一致"}
+	header := []string{"分组", "分组路径", "所在目录", "扩展名", "样本文件", "文件数", "体积", "缺失", "混合", "扩展名不一致",
+		"TMDB", "匹配", "缺失季", "缺失集", "多余集", "缺续集"}
 	if err := cw.Write(header); err != nil {
 		return err
 	}
@@ -358,6 +456,12 @@ func (r Report) WriteCSV(w io.Writer) error {
 				strings.Join(b.Missing, "+"),
 				boolText(b.Mixed),
 				boolText(b.MixedExt),
+				tmdbText(g),
+				matchText(g),
+				missingSeasonsText(g),
+				missingEpisodesText(g, b.DirPath),
+				extraEpisodesText(g, b.DirPath),
+				missingFranchiseText(g),
 			}
 			if err := cw.Write(row); err != nil {
 				return err
@@ -373,4 +477,107 @@ func boolText(b bool) string {
 		return "是"
 	}
 	return ""
+}
+
+// seasonFromDirPath 从目录路径的最后一段取季号（"Season 02"/"S03"/"第二季"）。
+func seasonFromDirPath(dirPath string) (int, bool) {
+	segs := strings.Split(strings.Trim(dirPath, "/"), "/")
+	if len(segs) == 0 {
+		return 0, false
+	}
+	n := rules.ParseSeasonDirNumber(segs[len(segs)-1])
+	if n == nil || *n <= 0 {
+		return 0, false
+	}
+	return *n, true
+}
+
+func tmdbText(g Group) string {
+	if g.TMDBID == "" {
+		return ""
+	}
+	return "tmdb-" + g.TMDBID
+}
+
+func matchText(g Group) string {
+	switch g.Match {
+	case "matched":
+		return "已匹配"
+	case "unmatched":
+		return "未匹配"
+	case "failed":
+		return "查询失败"
+	}
+	return ""
+}
+
+func missingSeasonsText(g Group) string {
+	if g.Completeness == nil || len(g.Completeness.MissingSeasons) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(g.Completeness.MissingSeasons))
+	for _, n := range g.Completeness.MissingSeasons {
+		parts = append(parts, fmt.Sprintf("S%02d", n))
+	}
+	return strings.Join(parts, "+")
+}
+
+// missingEpisodesText 按桶所在目录挑出该季的缺集，方便一行一个桶地看。
+func missingEpisodesText(g Group, dirPath string) string {
+	if g.Completeness == nil || len(g.Completeness.Seasons) == 0 {
+		return ""
+	}
+	season, ok := seasonFromDirPath(dirPath)
+	if !ok {
+		return ""
+	}
+	for _, s := range g.Completeness.Seasons {
+		if s.Season != season {
+			continue
+		}
+		if len(s.Missing) == 0 {
+			return ""
+		}
+		return joinEpisodes(s.Missing, s.Unknown)
+	}
+	return ""
+}
+
+func extraEpisodesText(g Group, dirPath string) string {
+	if g.Completeness == nil || len(g.Completeness.Seasons) == 0 {
+		return ""
+	}
+	season, ok := seasonFromDirPath(dirPath)
+	if !ok {
+		return ""
+	}
+	for _, s := range g.Completeness.Seasons {
+		if s.Season == season && len(s.Extra) > 0 {
+			return joinEpisodes(s.Extra, false)
+		}
+	}
+	return ""
+}
+
+func joinEpisodes(eps []int, unknown bool) string {
+	parts := make([]string, 0, len(eps))
+	for _, e := range eps {
+		parts = append(parts, fmt.Sprintf("E%02d", e))
+	}
+	out := strings.Join(parts, "+")
+	if unknown {
+		out += "（疑似编号差异）"
+	}
+	return out
+}
+
+func missingFranchiseText(g Group) string {
+	if g.Franchise == nil || len(g.Franchise.Missing) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(g.Franchise.Missing))
+	for _, p := range g.Franchise.Missing {
+		parts = append(parts, p.Title)
+	}
+	return strings.Join(parts, "、")
 }

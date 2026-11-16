@@ -534,6 +534,9 @@ type mediaOrganizeAuditDTO struct {
 	Required  []string `json:"required"`
 	Unit      string   `json:"unit"`
 	Exts      string   `json:"exts"`
+	// 不传时按开启处理。
+	CheckEpisodes  *bool `json:"check_episodes,omitempty"`
+	CheckFranchise *bool `json:"check_franchise,omitempty"`
 }
 
 func (h *Handler) runMediaOrganizeAudit(w http.ResponseWriter, r *http.Request) {
@@ -546,12 +549,14 @@ func (h *Handler) runMediaOrganizeAudit(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	report, err := h.mediaOrganize.RunAudit(r.Context(), mediaorganize.AuditRequest{
-		AccountID: in.AccountID,
-		RootID:    in.RootID,
-		RootName:  in.RootName,
-		Required:  in.Required,
-		Unit:      in.Unit,
-		Exts:      in.Exts,
+		AccountID:      in.AccountID,
+		RootID:         in.RootID,
+		RootName:       in.RootName,
+		Required:       in.Required,
+		Unit:           in.Unit,
+		Exts:           in.Exts,
+		CheckEpisodes:  in.CheckEpisodes,
+		CheckFranchise: in.CheckFranchise,
 	})
 	if err != nil {
 		writeErr(w, err)

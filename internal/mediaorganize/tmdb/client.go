@@ -249,6 +249,23 @@ func (c *Client) FetchImages(ctx context.Context, tmdbID, mediaType string) (jso
 	return c.getWithLimit(ctx, fmt.Sprintf("%s/%s/%d/images", c.apiBaseURL(), mediaType, id), q, 4<<20)
 }
 
+// FetchCollection 拉取合集（系列）信息，含 parts 列表；没有合集的作品不会走到这里。
+func (c *Client) FetchCollection(ctx context.Context, collectionID string) (json.RawMessage, error) {
+	if c == nil || c.apiKey == "" {
+		return nil, fmt.Errorf("tmdb: missing api key")
+	}
+	id, err := strconv.Atoi(strings.TrimSpace(collectionID))
+	if err != nil || id <= 0 {
+		return nil, fmt.Errorf("tmdb: invalid collection id %q", collectionID)
+	}
+	q := url.Values{}
+	q.Set("api_key", c.apiKey)
+	if c.language != "" {
+		q.Set("language", c.language)
+	}
+	return c.get(ctx, fmt.Sprintf("%s/collection/%d", c.apiBaseURL(), id), q)
+}
+
 // FetchTVSeason 拉取单季详情（含 episodes 列表与 still_path）。
 func (c *Client) FetchTVSeason(ctx context.Context, tmdbID string, seasonNumber int) (json.RawMessage, error) {
 	if c == nil || c.apiKey == "" {

@@ -51,6 +51,9 @@ type AuditRequest struct {
 	Required  []string `json:"required"`
 	Unit      string   `json:"unit"`
 	Exts      string   `json:"exts"`
+	// CheckEpisodes / CheckFranchise 为 nil 时按开启处理（前端不传＝默认检查）。
+	CheckEpisodes  *bool `json:"check_episodes,omitempty"`
+	CheckFranchise *bool `json:"check_franchise,omitempty"`
 }
 
 // AuditSummary 是体检的汇总数字。
@@ -61,6 +64,14 @@ type AuditSummary struct {
 	BadFiles    int   `json:"bad_files"`
 	BadBytes    int64 `json:"bad_bytes"`
 	ScannedDirs int   `json:"scanned_dirs"`
+	// 以下为 TMDB 完整性比对结果（未开启时全为 0）。
+	IncompleteGroups  int `json:"incomplete_groups"`
+	MissingSeasons    int `json:"missing_seasons"`
+	MissingEpisodes   int `json:"missing_episodes"`
+	MissingFranchises int `json:"missing_franchises"`
+	MissingMovies     int `json:"missing_movies"`
+	UnmatchedGroups   int `json:"unmatched_groups"`
+	TMDBRequests      int `json:"tmdb_requests"`
 }
 
 // AuditSeason 是报告里的一季（一个桶）。
@@ -75,6 +86,48 @@ type AuditSeason struct {
 	Mixed   bool     `json:"mixed"`
 }
 
+// AuditSeasonStatus 是一季的季集比对结果。
+type AuditSeasonStatus struct {
+	Season  int    `json:"season"`
+	Local   int    `json:"local"`
+	Aired   int    `json:"aired"`
+	Total   int    `json:"total"`
+	Missing []int  `json:"missing"`
+	Extra   []int  `json:"extra"`
+	Airing  bool   `json:"airing"`
+	Unknown bool   `json:"unknown"`
+	Note    string `json:"note,omitempty"`
+}
+
+// AuditCompleteness 是一部剧的季集完整性。
+type AuditCompleteness struct {
+	Seasons        []AuditSeasonStatus `json:"seasons"`
+	MissingSeasons []int               `json:"missing_seasons"`
+	ExtraSeasons   []int               `json:"extra_seasons"`
+	LatestSeason   int                 `json:"latest_season"`
+	Unreliable     bool                `json:"unreliable"`
+	Unparsed       int                 `json:"unparsed"`
+}
+
+// AuditFranchisePart 是合集里的一部作品。
+type AuditFranchisePart struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	ReleaseDate string `json:"release_date,omitempty"`
+	Runtime     int    `json:"runtime,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+}
+
+// AuditFranchise 是一个电影合集的完整性。
+type AuditFranchise struct {
+	Name     string               `json:"name"`
+	Parts    int                  `json:"parts"`
+	Local    []AuditFranchisePart `json:"local"`
+	Missing  []AuditFranchisePart `json:"missing"`
+	Optional []AuditFranchisePart `json:"optional"`
+	Upcoming []AuditFranchisePart `json:"upcoming"`
+}
+
 // AuditGroup 是一部剧（Unit=show）或一季（Unit=season）。
 type AuditGroup struct {
 	ID       string        `json:"id"`
@@ -87,6 +140,13 @@ type AuditGroup struct {
 	Mixed    bool          `json:"mixed"`
 	MixedExt bool          `json:"mixed_ext"`
 	Seasons  []AuditSeason `json:"seasons"`
+
+	// 以下由 TMDB 完整性比对填充。
+	TMDBID       string             `json:"tmdb_id,omitempty"`
+	MediaType    string             `json:"media_type,omitempty"`
+	Match        string             `json:"match,omitempty"`
+	Completeness *AuditCompleteness `json:"completeness,omitempty"`
+	Franchise    *AuditFranchise    `json:"franchise,omitempty"`
 }
 
 // AuditReport 是一次体检的结果，进程内保存，供前端取用与导出 CSV。
@@ -120,43 +180,86 @@ func (s *Service) RunAudit(ctx context.Context, req AuditRequest) (*AuditReport,
 		return nil, domain.Errorf(domain.CodeValidation, "没有可判定的媒体信息项，请先在设置里配置媒体信息顺序")
 	}
 
+	checkEpisodes := boolOrDefault(req.CheckEpisodes, true)
+	checkFranchise := boolOrDefault(req.CheckFranchise, true)
+
 	// 取树会打出上百个请求，走和整理任务同一套「API 额外补偿间隔」，
 	// 避免体检绕过限速设置把网盘打出风控。
 	scanCtx := s.withAPIDelay(ctx)
-	rep, dirs, err := runAudit(scanCtx, s.files, req, required, unit)
+	rep, dirs, err := runAudit(scanCtx, s.files, req, required, unit, checkEpisodes)
 	if err != nil {
 		return nil, err
+	}
+
+	// TMDB 完整性比对：只打 TMDB，不增加网盘请求；没配 key 时整段跳过。
+	tmdbCalls := 0
+	if checkEpisodes || checkFranchise {
+		if client, cerr := s.newTMDBClient(""); cerr == nil {
+			tmdbCalls = s.applyCompleteness(ctx, &rep, client, s.tmdbInterval(),
+				checkEpisodes, checkFranchise, time.Now())
+		} else {
+			checkEpisodes, checkFranchise = false, false
+			req.CheckEpisodes, req.CheckFranchise = &checkEpisodes, &checkFranchise
+		}
 	}
 	report := &AuditReport{
 		ID:        newAuditID(),
 		CreatedAt: time.Now().Unix(),
 		Request:   req,
 		Summary: AuditSummary{
-			TotalGroups: rep.TotalGroups,
-			BadGroups:   rep.BadGroups,
-			TotalFiles:  rep.TotalFiles,
-			BadFiles:    rep.BadFiles,
-			BadBytes:    rep.BadBytes,
-			ScannedDirs: dirs,
+			TotalGroups:  rep.TotalGroups,
+			BadGroups:    rep.BadGroups,
+			TotalFiles:   rep.TotalFiles,
+			BadFiles:     rep.BadFiles,
+			BadBytes:     rep.BadBytes,
+			ScannedDirs:  dirs,
+			TMDBRequests: tmdbCalls,
 		},
 		raw: rep,
 	}
 	report.Request.Required = required
 	report.Request.Unit = unit
 	for _, g := range rep.Groups {
-		report.Groups = append(report.Groups, toAuditGroup(g))
+		ag := toAuditGroup(g)
+		report.Groups = append(report.Groups, ag)
+		if ag.Match == "unmatched" || ag.Match == "failed" {
+			report.Summary.UnmatchedGroups++
+		}
+		if ag.Completeness != nil {
+			if len(ag.Completeness.MissingSeasons) > 0 {
+				report.Summary.MissingSeasons += len(ag.Completeness.MissingSeasons)
+			}
+			for _, sd := range ag.Completeness.Seasons {
+				if !sd.Unknown {
+					report.Summary.MissingEpisodes += len(sd.Missing)
+				}
+			}
+		}
+		if ag.Franchise != nil && len(ag.Franchise.Missing) > 0 {
+			report.Summary.MissingFranchises++
+			report.Summary.MissingMovies += len(ag.Franchise.Missing)
+		}
+		if auditGroupIncomplete(ag) {
+			report.Summary.IncompleteGroups++
+		}
 	}
 	s.storeAudit(report)
 	return report, nil
 }
 
 // runAudit 拉树并判定，供 RunAudit 与单测共用。
-func runAudit(ctx context.Context, lister auditLister, req AuditRequest, required []string, unit string) (audit.Report, int, error) {
+func runAudit(ctx context.Context, lister auditLister, req AuditRequest, required []string, unit string,
+	collectEpisodes bool) (audit.Report, int, error) {
 	tree, dirs, err := buildAuditTree(ctx, lister, req.AccountID, req.RootID, req.RootName)
 	if err != nil {
 		return audit.Report{}, dirs, err
 	}
-	return audit.Run(tree, audit.Options{Required: required, Unit: unit, Exts: req.Exts}), dirs, nil
+	return audit.Run(tree, audit.Options{
+		Required:        required,
+		Unit:            unit,
+		Exts:            req.Exts,
+		CollectEpisodes: collectEpisodes,
+	}), dirs, nil
 }
 
 // GetAudit 取一份缓存中的报告。
@@ -298,7 +401,101 @@ func toAuditGroup(g audit.Group) AuditGroup {
 	if out.Seasons == nil {
 		out.Seasons = []AuditSeason{}
 	}
+	out.TMDBID = g.TMDBID
+	out.MediaType = g.MediaType
+	out.Match = g.Match
+	if g.Completeness != nil {
+		out.Completeness = toAuditCompleteness(*g.Completeness, g.UnparsedEpisodes)
+	}
+	if g.Franchise != nil {
+		out.Franchise = toAuditFranchise(*g.Franchise)
+	}
 	return out
+}
+
+func toAuditCompleteness(d audit.ShowDiff, unparsed int) *AuditCompleteness {
+	out := &AuditCompleteness{
+		MissingSeasons: nonNilInts(d.MissingSeasons),
+		ExtraSeasons:   nonNilInts(d.ExtraSeasons),
+		LatestSeason:   d.LatestSeason,
+		Unreliable:     d.Unreliable,
+		Unparsed:       unparsed,
+	}
+	for _, sd := range d.Seasons {
+		out.Seasons = append(out.Seasons, AuditSeasonStatus{
+			Season:  sd.Season,
+			Local:   sd.Local,
+			Aired:   sd.Aired,
+			Total:   sd.Total,
+			Missing: nonNilInts(sd.Missing),
+			Extra:   nonNilInts(sd.Extra),
+			Airing:  sd.Airing,
+			Unknown: sd.Unknown,
+			Note:    sd.Note,
+		})
+	}
+	if out.Seasons == nil {
+		out.Seasons = []AuditSeasonStatus{}
+	}
+	return out
+}
+
+func toAuditFranchise(d audit.CollectionDiff) *AuditFranchise {
+	out := &AuditFranchise{
+		Name:     d.Name,
+		Parts:    d.Parts,
+		Local:    toFranchiseParts(d.Local, nil),
+		Missing:  toFranchiseParts(d.Missing, nil),
+		Optional: toFranchiseParts(d.Optional, d.Notes),
+		Upcoming: toFranchiseParts(d.Upcoming, nil),
+	}
+	return out
+}
+
+func toFranchiseParts(list []audit.FranchisePart, notes map[string]string) []AuditFranchisePart {
+	out := make([]AuditFranchisePart, 0, len(list))
+	for _, p := range list {
+		out = append(out, AuditFranchisePart{
+			ID:          p.ID,
+			Title:       p.Title,
+			ReleaseDate: p.ReleaseDate,
+			Runtime:     p.Runtime,
+			Reason:      notes[p.ID],
+		})
+	}
+	return out
+}
+
+func nonNilInts(in []int) []int {
+	if in == nil {
+		return []int{}
+	}
+	return in
+}
+
+// auditGroupIncomplete 判断分组是否存在需要处理的问题（信息缺失/混用/缺季缺集/缺续集）。
+func auditGroupIncomplete(g AuditGroup) bool {
+	if !g.OK {
+		return true
+	}
+	if g.Completeness != nil && len(g.Completeness.MissingSeasons) > 0 {
+		return true
+	}
+	if g.Completeness != nil {
+		for _, sd := range g.Completeness.Seasons {
+			if len(sd.Missing) > 0 && !sd.Unknown {
+				return true
+			}
+		}
+	}
+	return g.Franchise != nil && len(g.Franchise.Missing) > 0
+}
+
+func boolOrDefault(v *bool, def bool) bool {
+	if v == nil {
+		return def
+	}
+	return *v
 }
 
 // buildAuditTree 拉取 rootID 下的完整目录树（逐目录并行遍历）。

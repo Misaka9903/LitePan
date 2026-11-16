@@ -262,6 +262,56 @@ export interface MediaAuditSummary {
   bad_files: number;
   bad_bytes: number;
   scanned_dirs: number;
+  /** TMDB 完整性比对：缺季/缺集/缺续集/未匹配（未开启时为 0） */
+  incomplete_groups?: number;
+  missing_seasons?: number;
+  missing_episodes?: number;
+  missing_franchises?: number;
+  missing_movies?: number;
+  unmatched_groups?: number;
+  tmdb_requests?: number;
+}
+
+/** 一季的季集比对结果 */
+export interface MediaAuditSeasonStatus {
+  season: number;
+  local: number;
+  aired: number;
+  total: number;
+  missing: number[];
+  extra: number[];
+  airing: boolean;
+  /** 本地集号与 TMDB 对不上（疑似绝对集号/分季差异），缺失仅供参考 */
+  unknown: boolean;
+  note?: string;
+}
+
+export interface MediaAuditCompleteness {
+  seasons: MediaAuditSeasonStatus[];
+  missing_seasons: number[];
+  extra_seasons: number[];
+  latest_season: number;
+  unreliable: boolean;
+  unparsed: number;
+}
+
+export interface MediaAuditFranchisePart {
+  id: string;
+  title: string;
+  release_date?: string;
+  runtime?: number;
+  reason?: string;
+}
+
+/** 电影合集（系列）比对结果 */
+export interface MediaAuditFranchise {
+  name: string;
+  parts: number;
+  local: MediaAuditFranchisePart[];
+  missing: MediaAuditFranchisePart[];
+  /** 前传/重剪版等，只提示不算缺 */
+  optional: MediaAuditFranchisePart[];
+  upcoming: MediaAuditFranchisePart[];
 }
 
 export interface MediaAuditSeason {
@@ -287,19 +337,18 @@ export interface MediaAuditGroup {
   /** 同季混用多种媒体扩展名（整理时会被 skip_mixed_ext 跳过） */
   mixed_ext?: boolean;
   seasons: MediaAuditSeason[];
+  /** TMDB 完整性比对；未开启或未匹配时为空 */
+  tmdb_id?: string;
+  media_type?: "tv" | "movie";
+  match?: "matched" | "unmatched" | "failed";
+  completeness?: MediaAuditCompleteness;
+  franchise?: MediaAuditFranchise;
 }
 
 export interface MediaAuditReport {
   id: string;
   created_at: number;
-  request: {
-    account_id: number;
-    root_id: string;
-    root_name?: string;
-    required: string[];
-    unit: string;
-    exts?: string;
-  };
+  request: MediaAuditReportRequest;
   summary: MediaAuditSummary;
   groups: MediaAuditGroup[];
 }
@@ -311,6 +360,20 @@ export interface MediaAuditRequest {
   required?: string[];
   unit?: "show" | "season";
   exts?: string;
+  /** 不传时后端按开启处理 */
+  check_episodes?: boolean;
+  check_franchise?: boolean;
+}
+
+export interface MediaAuditReportRequest {
+  account_id: number;
+  root_id: string;
+  root_name?: string;
+  required: string[];
+  unit: string;
+  exts?: string;
+  check_episodes?: boolean;
+  check_franchise?: boolean;
 }
 
 export function runMediaOrganizeAudit(payload: MediaAuditRequest) {

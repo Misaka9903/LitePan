@@ -55,6 +55,10 @@ type Service struct {
 	// auditReports / auditOrder 保存进程内的信息体检报告（有 TTL 与条数上限）。
 	auditReports map[string]*AuditReport
 	auditOrder   []string
+
+	// tmdbCache 缓存完整性比对用到的 TMDB 结果（剧/季/合集），避免重复体检重复请求。
+	tmdbMu    sync.Mutex
+	tmdbCache map[string]tmdbCacheEntry
 }
 
 type ServiceOptions struct {
