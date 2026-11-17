@@ -34,8 +34,8 @@ var moSettingFieldToKey = map[string]string{
 }
 
 var validMediaTagKeys = map[string]struct{}{
-	"screen_size": {}, "frame_rate": {}, "video_codec": {},
-	"audio_codec": {}, "audio_channels": {},
+	"screen_size": {}, "hdr": {}, "bit_depth": {}, "frame_rate": {},
+	"video_codec": {}, "audio_codec": {}, "audio_channels": {},
 }
 
 func SettingsDict(svc *settings.Service) map[string]any {
@@ -93,7 +93,7 @@ func UpdateSettings(ctx context.Context, svc *settings.Service, updates map[stri
 func mediaTagOrderJSON(raw string) string {
 	parsed, err := parseMediaTagOrder(raw)
 	if err != nil {
-		return `["screen_size","video_codec","audio_codec","audio_channels"]`
+		return `["screen_size","hdr","bit_depth","frame_rate","video_codec","audio_codec","audio_channels"]`
 	}
 	return string(parsed)
 }
