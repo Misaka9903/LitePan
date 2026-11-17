@@ -60,13 +60,16 @@ type sourceToken struct {
 	capped bool
 }
 
+// cacheSchemaVersion 变更标签字段集合时递增，旧缓存自动失效。
+const cacheSchemaVersion = 2
+
 type cacheEntry struct {
-	OK   bool              `json:"ok"`
-	Tags map[string]string `json:"tags,omitempty"`
-	At   int64             `json:"at"`
-	// 抽样文件指纹：同一个文件被替换后 size 会变，据此判断是否需要重探。
-	FileID string `json:"file_id,omitempty"`
-	Size   int64  `json:"size,omitempty"`
+	Version int               `json:"version,omitempty"`
+	OK      bool              `json:"ok"`
+	Tags    map[string]string `json:"tags,omitempty"`
+	At      int64             `json:"at"`
+	FileID  string            `json:"file_id,omitempty"`
+	Size    int64             `json:"size,omitempty"`
 }
 
 // Service 读取网盘文件头补全媒体标签，并按桶缓存结果。
@@ -209,6 +212,10 @@ func (s *Service) cached(key string, req Request) (map[string]string, bool) {
 	if !ok {
 		return nil, false
 	}
+	if entry.Version != cacheSchemaVersion {
+		delete(s.cache, key)
+		return nil, false
+	}
 	if entry.At > 0 && time.Since(time.Unix(entry.At, 0)) > cacheTTL {
 		delete(s.cache, key)
 		return nil, false
@@ -228,11 +235,12 @@ func (s *Service) cached(key string, req Request) (map[string]string, bool) {
 func (s *Service) store(key string, req Request, tags map[string]string) {
 	s.mu.Lock()
 	s.cache[key] = cacheEntry{
-		OK:     tags != nil,
-		Tags:   tags,
-		At:     time.Now().Unix(),
-		FileID: req.FileID,
-		Size:   req.Size,
+		Version: cacheSchemaVersion,
+		OK:      tags != nil,
+		Tags:    tags,
+		At:      time.Now().Unix(),
+		FileID:  req.FileID,
+		Size:    req.Size,
 	}
 	s.evictLocked()
 	s.mu.Unlock()

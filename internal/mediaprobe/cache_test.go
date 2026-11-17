@@ -33,7 +33,7 @@ func TestCacheExpiresAfterTTL(t *testing.T) {
 	s := newCacheTestService(t)
 	req := testRequest("f1", 1024)
 	key := BucketKey(req)
-	s.cache[key] = cacheEntry{OK: true, Tags: sampleTags(), At: time.Now().Add(-cacheTTL - time.Hour).Unix(), FileID: "f1", Size: 1024}
+	s.cache[key] = cacheEntry{Version: cacheSchemaVersion, OK: true, Tags: sampleTags(), At: time.Now().Add(-cacheTTL - time.Hour).Unix(), FileID: "f1", Size: 1024}
 
 	if _, done := s.cached(key, req); done {
 		t.Fatal("超过 TTL 的条目不应命中")
@@ -47,7 +47,7 @@ func TestCacheKeepsFreshEntry(t *testing.T) {
 	s := newCacheTestService(t)
 	req := testRequest("f1", 1024)
 	key := BucketKey(req)
-	s.cache[key] = cacheEntry{OK: true, Tags: sampleTags(), At: time.Now().Add(-time.Hour).Unix(), FileID: "f1", Size: 1024}
+	s.cache[key] = cacheEntry{Version: cacheSchemaVersion, OK: true, Tags: sampleTags(), At: time.Now().Add(-time.Hour).Unix(), FileID: "f1", Size: 1024}
 
 	tags, done := s.cached(key, req)
 	if !done || tags["screen_size"] != "1080p" {
@@ -58,7 +58,7 @@ func TestCacheKeepsFreshEntry(t *testing.T) {
 func TestCacheInvalidatesWhenSameFileResized(t *testing.T) {
 	s := newCacheTestService(t)
 	key := BucketKey(testRequest("f1", 1024))
-	s.cache[key] = cacheEntry{OK: true, Tags: sampleTags(), At: time.Now().Unix(), FileID: "f1", Size: 1024}
+	s.cache[key] = cacheEntry{Version: cacheSchemaVersion, OK: true, Tags: sampleTags(), At: time.Now().Unix(), FileID: "f1", Size: 1024}
 
 	replaced := testRequest("f1", 4096) // 同一集换了更高码率的源
 	if _, done := s.cached(key, replaced); done {
@@ -72,7 +72,7 @@ func TestCacheInvalidatesWhenSameFileResized(t *testing.T) {
 func TestCacheKeepsOtherFilesInBucket(t *testing.T) {
 	s := newCacheTestService(t)
 	key := BucketKey(testRequest("f1", 1024))
-	s.cache[key] = cacheEntry{OK: true, Tags: sampleTags(), At: time.Now().Unix(), FileID: "f1", Size: 1024}
+	s.cache[key] = cacheEntry{Version: cacheSchemaVersion, OK: true, Tags: sampleTags(), At: time.Now().Unix(), FileID: "f1", Size: 1024}
 
 	// 同季另一集，体积本来就和抽样那一集不同，不能因此判为失效。
 	other := testRequest("f2", 999999)
@@ -85,7 +85,7 @@ func TestCacheEvictsOldestBeyondLimit(t *testing.T) {
 	s := newCacheTestService(t)
 	base := time.Now().Add(-time.Duration(cacheMaxItems) * time.Minute).Unix()
 	for i := 0; i < cacheMaxItems+5; i++ {
-		s.cache[fmt.Sprintf("k%05d", i)] = cacheEntry{OK: true, Tags: sampleTags(), At: base + int64(i), FileID: "f"}
+		s.cache[fmt.Sprintf("k%05d", i)] = cacheEntry{Version: cacheSchemaVersion, OK: true, Tags: sampleTags(), At: base + int64(i), FileID: "f"}
 	}
 	s.evictLocked()
 
