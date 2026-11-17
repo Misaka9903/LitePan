@@ -37,10 +37,6 @@ const tmdbLanguageOptions = [
   { value: "en-US", label: "English" },
 ];
 
-const probeModeOptions = [
-  { value: "prefer", label: "探测优先（推荐）" },
-  { value: "fill", label: "只补空缺" },
-];
 
 const conflictPolicyOptions = [
   { value: "skip", label: "跳过（推荐）" },
@@ -550,21 +546,6 @@ defineExpose(
           </template>
         </SettingsRow>
 
-        <SettingsRow :show-changed-badge="true" :changed="isFieldChanged('probe_mode')">
-          <template #info>
-            <div class="settings-row__label">
-              <span>探测结果与文件名冲突时</span>
-              <SettingsHelpTooltip title="探测结果与文件名冲突时说明">
-                <p>只补空缺：文件名已有的标签不覆盖；标签已齐全时不会探测，不产生任何读取。</p>
-                <p>探测优先：以文件头为准，探测不到的字段保留文件名结果。</p>
-              </SettingsHelpTooltip>
-            </div>
-          </template>
-          <template #control>
-            <AppSelect v-model="settings.probe_mode" :options="probeModeOptions" />
-          </template>
-        </SettingsRow>
-
         <SettingsRow :show-changed-badge="true" :changed="isFieldChanged('align_media_tags')">
           <template #info>
             <div class="settings-row__label">
@@ -576,21 +557,6 @@ defineExpose(
           </template>
           <template #control>
             <SettingsBoolSegment v-model="settings.align_media_tags" label="强迫症模式" />
-          </template>
-        </SettingsRow>
-
-        <SettingsRow :show-changed-badge="true" :changed="isFieldChanged('force_rename')">
-          <template #info>
-            <div class="settings-row__label">
-              <span>强制重命名</span>
-              <SettingsHelpTooltip title="强制重命名说明">
-                <p>已整理过的文件也重新生成名字，用于把历史文件统一成当前命名规则。</p>
-                <p>开启后每次整理都会全量处理（含探测），建议统一完成后关闭。</p>
-              </SettingsHelpTooltip>
-            </div>
-          </template>
-          <template #control>
-            <SettingsBoolSegment v-model="settings.force_rename" label="强制重命名" />
           </template>
         </SettingsRow>
 

@@ -107,7 +107,6 @@ export interface MediaOrganizeSettings {
   file_extensions: string;
   metadata_extensions: string;
   media_tag_order: string[] | string;
-  force_rename: boolean;
   align_media_tags: boolean;
   probe_enabled: boolean;
   probe_mode: string;

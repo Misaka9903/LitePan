@@ -50,7 +50,6 @@ type Planner struct {
 	alignMediaTags bool
 	prober         MediaProber
 	probeMode      string
-	forceRename    bool
 	// skipMixedExt 为真时，同一季混用多种媒体扩展名的剧整部跳过。
 	skipMixedExt bool
 	// probeSeen 记录本次计划里已写过日志的探测桶，避免整季刷屏。
@@ -149,17 +148,14 @@ func (p *Planner) loadSettings() {
 		p.mediaTagOrder = rules.DefaultMediaTagOrder
 	}
 	p.alignMediaTags = rules.SettingBool(p.settings["mo_align_media_tags"], false)
-	p.forceRename = rules.SettingBool(p.settings["mo_force_rename"], false)
 
 	// 默认开启：混装季的标签与命名都不可靠，宁可停下来让用户看一眼。
 	p.skipMixedExt = rules.SettingBool(p.settings["mo_skip_mixed_ext"], true)
 
 	// 探测默认关闭：读文件头会给网盘带来额外请求，不能让升级后的整理任务凭空变慢。
-	p.probeMode = strings.ToLower(strings.TrimSpace(strSetting(p.settings, "mo_probe_mode", "prefer")))
-	if !rules.SettingBool(p.settings["mo_probe_enabled"], false) {
-		p.probeMode = "off"
-	} else if p.probeMode != "fill" && p.probeMode != "prefer" {
-		// 旧配置里的 "force" 同 "prefer"，一并收敛。
+	// 探测只有开/关：开启即以文件头为准（原「探测优先」），不再提供模式选择。
+	p.probeMode = "off"
+	if rules.SettingBool(p.settings["mo_probe_enabled"], false) {
 		p.probeMode = "prefer"
 	}
 
