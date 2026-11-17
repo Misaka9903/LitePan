@@ -353,6 +353,19 @@ func (p *Planner) skip(item domain.FileItem, reason string) {
 	})
 }
 
+// skipInGroup 与 skip 相同，额外记录作品名，便于按作品去重统计。
+func (p *Planner) skipInGroup(item domain.FileItem, reason, group string) {
+	entry := map[string]any{
+		"file_id":   item.ID,
+		"file_name": item.Name,
+		"reason":    reason,
+	}
+	if group != "" {
+		entry["group"] = group
+	}
+	p.skippedItems = append(p.skippedItems, entry)
+}
+
 func (p *Planner) isMedia(item domain.FileItem) bool {
 	if item.IsDir || !strings.Contains(item.Name, ".") {
 		return false

@@ -907,6 +907,7 @@ func summarizePlan(plan *Plan, aborted bool) map[string]any {
 		}
 	}
 	probeSkipped := 0
+	probeWorks := map[string]struct{}{}
 	for _, item := range plan.Skipped {
 		id := stringFromAny(item["file_id"])
 		if id != "" && seen[id] {
@@ -923,19 +924,23 @@ func summarizePlan(plan *Plan, aborted bool) map[string]any {
 		}
 		if strings.HasPrefix(reason, "媒体信息探测失败") {
 			probeSkipped++
+			if g := stringFromAny(item["group"]); g != "" {
+				probeWorks[g] = struct{}{}
+			}
 		}
 	}
 	return map[string]any{
-		"total":            total,
-		"renamed":          renamed,
-		"moved":            moved,
-		"skipped":          skipped,
-		"normal_skipped":   normalSkipped,
-		"abnormal_skipped": skipped - normalSkipped,
-		"probe_skipped":    probeSkipped,
-		"failed":           failed,
-		"pending":          pending,
-		"stopped":          aborted,
+		"total":               total,
+		"renamed":             renamed,
+		"moved":               moved,
+		"skipped":             skipped,
+		"normal_skipped":      normalSkipped,
+		"abnormal_skipped":    skipped - normalSkipped,
+		"probe_skipped":       probeSkipped,
+		"probe_skipped_works": len(probeWorks),
+		"failed":              failed,
+		"pending":             pending,
+		"stopped":             aborted,
 	}
 }
 
@@ -949,7 +954,11 @@ func formatSummaryZh(summary map[string]any) string {
 	}
 	probeNote := ""
 	if probe := n("probe_skipped"); probe > 0 {
-		probeNote = fmt.Sprintf("，其中探测失败 %d", probe)
+		if works := n("probe_skipped_works"); works > 0 {
+			probeNote = fmt.Sprintf("，其中探测失败 %d 个文件 / %d 部作品", probe, works)
+		} else {
+			probeNote = fmt.Sprintf("，其中探测失败 %d 个文件", probe)
+		}
 	}
 	line := fmt.Sprintf(
 		"共 %d 项，成功 %d（重命名 %d / 移动 %d），跳过 %d（无需处理 %d / 需关注 %d%s），失败 %d，未执行 %d",
