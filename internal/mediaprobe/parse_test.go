@@ -178,7 +178,7 @@ func TestParseDynamicRangeAndBitDepth(t *testing.T) {
 		{
 			name:     "DoVi P8",
 			in:       "  Stream #0:0: Video: hevc (Main 10), yuv420p10le(tv, bt2020nc/bt2020/smpte2084), 3840x2160, 23.98 fps\n    Side data:\n      DOVI configuration record: version: 1.0, profile: 8",
-			wantHDR:  "DoVi",
+			wantHDR:  "DoVi P8",
 			wantBits: "10-bit",
 		},
 		{

@@ -10,8 +10,8 @@ const jsonHDR10 = `{"streams":[
 
 const jsonDoVi = `{"streams":[
  {"codec_type":"video","codec_name":"hevc","width":3840,"height":2160,"pix_fmt":"yuv420p10le","avg_frame_rate":"24/1","color_transfer":"smpte2084",
-  "side_data_list":[{"side_data_type":"DOVI configuration record"},{"side_data_type":"Mastering display metadata"}]},
- {"codec_type":"audio","codec_name":"eac3","channels":6,"channel_layout":"5.1","disposition":{"default":1}}
+  "side_data_list":[{"side_data_type":"DOVI configuration record","dv_profile":8},{"side_data_type":"Mastering display metadata"}]},
+ {"codec_type":"audio","codec_name":"eac3","profile":"Dolby Digital Plus + Dolby Atmos","channels":6,"channel_layout":"5.1","disposition":{"default":1}}
 ]}`
 
 const jsonHDR10Plus = `{"streams":[
@@ -39,8 +39,8 @@ func TestParseJSON(t *testing.T) {
 		{
 			name: "DoVi 优先于 HDR10",
 			in:   jsonDoVi,
-			want: Info{ScreenSize: "2160p", HDR: "DoVi", BitDepth: "10-bit", FrameRate: "24",
-				VideoCodec: "H.265", AudioCodec: "DDP", AudioChannels: "5.1"},
+			want: Info{ScreenSize: "2160p", HDR: "DoVi P8", BitDepth: "10-bit", FrameRate: "24",
+				VideoCodec: "H.265", AudioCodec: "DDP Atmos", AudioChannels: "5.1"},
 		},
 		{
 			name: "HDR10+ side data",
@@ -71,5 +71,19 @@ func TestParseJSON(t *testing.T) {
 func TestParseJSONInvalid(t *testing.T) {
 	if _, err := ParseJSON([]byte("not json")); err == nil {
 		t.Fatal("非法 JSON 应返回错误")
+	}
+}
+
+func TestParseDynamicRangeDoViProfile(t *testing.T) {
+	cases := map[string]string{
+		"Stream #0:0: Video: hevc\n      DOVI configuration record: version: 1.0, profile: 5": "DoVi P5",
+		"Stream #0:0: Video: hevc\n      DOVI configuration record: version: 1.0, profile: 7": "DoVi P7",
+		"Stream #0:0: Video: hevc\n      DOVI configuration record: version: 1.0, profile: 8": "DoVi P8",
+		"Stream #0:0: Video: hevc (dvhe.08.06)":                                               "DoVi",
+	}
+	for in, want := range cases {
+		if got := parseDynamicRange(in); got != want {
+			t.Fatalf("parseDynamicRange(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

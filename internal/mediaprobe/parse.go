@@ -134,6 +134,9 @@ func parseDynamicRange(stderr string) string {
 		strings.Contains(lower, "dvhe"),
 		strings.Contains(lower, "dvh1"),
 		strings.Contains(lower, "dvav"):
+		if prof := doviProfileFromText(stderr); prof > 0 {
+			return doviLabel(prof)
+		}
 		return "DoVi"
 	case strings.Contains(lower, "smpte2094-40"), strings.Contains(lower, "hdr10+"):
 		return "HDR10+"
@@ -254,6 +257,14 @@ func normalizeVideoCodec(codec string) string {
 }
 
 func normalizeAudioCodec(codec, rest string) string {
+	label := baseAudioCodec(codec, rest)
+	if label != "" && strings.Contains(strings.ToLower(rest), "atmos") && !strings.Contains(label, "Atmos") {
+		label += " Atmos"
+	}
+	return label
+}
+
+func baseAudioCodec(codec, rest string) string {
 	switch strings.ToLower(strings.TrimSpace(codec)) {
 	case "aac":
 		return "AAC"
@@ -370,6 +381,7 @@ type ffprobeStream struct {
 	BitsPerRawSample string `json:"bits_per_raw_sample"`
 	SideDataList     []struct {
 		SideDataType string `json:"side_data_type"`
+		DvProfile    int    `json:"dv_profile"`
 	} `json:"side_data_list"`
 	Disposition struct {
 		Default int `json:"default"`
@@ -472,6 +484,12 @@ func hdrFromStream(st *ffprobeStream) string {
 		t := strings.ToLower(sd.SideDataType)
 		switch {
 		case strings.Contains(t, "dovi"), strings.Contains(t, "dolby vision"):
+			if sd.DvProfile > 0 {
+				return doviLabel(sd.DvProfile)
+			}
+			if prof := doviProfileFromText(sd.SideDataType); prof > 0 {
+				return doviLabel(prof)
+			}
 			return "DoVi"
 		case strings.Contains(t, "hdr10+"), strings.Contains(t, "smpte2094-40"):
 			return "HDR10+"
@@ -516,4 +534,24 @@ func channelsFromJSON(n int, layout string) string {
 		return "1.0"
 	}
 	return ""
+}
+
+var doviProfileRe = regexp.MustCompile(`(?i)(?:profile|dv_profile)[:\s=]*(\d)`)
+
+// doviProfileFromText 从 ffmpeg/ffprobe 的 DoVi 描述里取 profile 号。
+func doviProfileFromText(text string) int {
+	if m := doviProfileRe.FindStringSubmatch(text); len(m) >= 2 {
+		if n, err := strconv.Atoi(m[1]); err == nil {
+			return n
+		}
+	}
+	return 0
+}
+
+// doviLabel 输出与 TgtoDrive 一致的写法：DoVi P5 / P7 / P8。
+func doviLabel(profile int) string {
+	if profile <= 0 {
+		return "DoVi"
+	}
+	return fmt.Sprintf("DoVi P%d", profile)
 }
