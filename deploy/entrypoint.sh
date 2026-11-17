@@ -9,4 +9,11 @@ if [ ! -e /app/data/tools/ffmpeg ] && [ -x /opt/ffmpeg/ffmpeg ]; then
     echo "[entrypoint] 已播种内置 ffmpeg 到 /app/data/tools/ffmpeg"
 fi
 
+if [ ! -e /app/data/tools/ffprobe ] && [ -x /opt/ffmpeg/ffprobe ]; then
+    mkdir -p /app/data/tools
+    cp /opt/ffmpeg/ffprobe /app/data/tools/ffprobe
+    chmod +x /app/data/tools/ffprobe
+    echo "[entrypoint] 已播种内置 ffprobe 到 /app/data/tools/ffprobe"
+fi
+
 exec /app/litepan
