@@ -298,7 +298,7 @@ func (p *Planner) planGroupWithMatch(
 			p.skip(entry.item, "无法识别集数")
 			continue
 		}
-		if p.actionType == "rename" && rules.IsAlreadyOrganized(entry.item.Name, p.marker) &&
+		if p.actionType == "rename" && !p.forceRename && rules.IsAlreadyOrganized(entry.item.Name, p.marker) &&
 			!p.renameEntryNeedsPlacement(key, entry) &&
 			!p.shouldKeepStructuredFileForTMDBDir(entry, items, tmdbID) {
 			p.skip(entry.item, p.structuredSkipReason(items, tmdbID))
@@ -447,6 +447,10 @@ func (p *Planner) structuredSkipReason(items []batchEntry, tmdbID string) string
 
 func (p *Planner) isAlreadyOrganizedRenameGroup(key groupKey, items []batchEntry) bool {
 	if p.actionType != "rename" || len(items) == 0 {
+		return false
+	}
+	// 强制重命名：跳过"整组已整理"的短路，让每个文件重新生成名字。
+	if p.forceRename {
 		return false
 	}
 	if p.useTMDB && p.tmdbAvailable {

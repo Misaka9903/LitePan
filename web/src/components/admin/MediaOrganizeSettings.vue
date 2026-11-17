@@ -579,6 +579,21 @@ defineExpose(
           </template>
         </SettingsRow>
 
+        <SettingsRow :show-changed-badge="true" :changed="isFieldChanged('force_rename')">
+          <template #info>
+            <div class="settings-row__label">
+              <span>强制重命名</span>
+              <SettingsHelpTooltip title="强制重命名说明">
+                <p>已整理过的文件也重新生成名字，用于把历史文件统一成当前命名规则。</p>
+                <p>开启后每次整理都会全量处理（含探测），建议统一完成后关闭。</p>
+              </SettingsHelpTooltip>
+            </div>
+          </template>
+          <template #control>
+            <SettingsBoolSegment v-model="settings.force_rename" label="强制重命名" />
+          </template>
+        </SettingsRow>
+
         <div class="mo-tag-row">
           <SettingsRow
             :show-changed-badge="true"

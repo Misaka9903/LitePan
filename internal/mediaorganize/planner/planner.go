@@ -50,6 +50,7 @@ type Planner struct {
 	alignMediaTags bool
 	prober         MediaProber
 	probeMode      string
+	forceRename    bool
 	// skipMixedExt 为真时，同一季混用多种媒体扩展名的剧整部跳过。
 	skipMixedExt bool
 	// probeSeen 记录本次计划里已写过日志的探测桶，避免整季刷屏。
@@ -148,6 +149,7 @@ func (p *Planner) loadSettings() {
 		p.mediaTagOrder = rules.DefaultMediaTagOrder
 	}
 	p.alignMediaTags = rules.SettingBool(p.settings["mo_align_media_tags"], false)
+	p.forceRename = rules.SettingBool(p.settings["mo_force_rename"], false)
 
 	// 默认开启：混装季的标签与命名都不可靠，宁可停下来让用户看一眼。
 	p.skipMixedExt = rules.SettingBool(p.settings["mo_skip_mixed_ext"], true)
