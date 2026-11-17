@@ -8,7 +8,7 @@ const (
 )
 
 var MediaTagFields = []string{
-	"screen_size", "frame_rate", "video_codec", "audio_codec", "audio_channels",
+	"screen_size", "hdr", "bit_depth", "frame_rate", "video_codec", "audio_codec", "audio_channels",
 }
 
 var DefaultMediaTagOrder = []string{

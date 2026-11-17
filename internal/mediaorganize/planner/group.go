@@ -451,6 +451,8 @@ func (p *Planner) computeAlignDefaults(groups map[groupKey][]batchEntry) map[gro
 			totals[bk]++
 			tagValues := map[string]any{
 				"screen_size":    entry.fileParsed.ScreenSize,
+				"hdr":            entry.fileParsed.HDR,
+				"bit_depth":      entry.fileParsed.BitDepth,
 				"frame_rate":     entry.fileParsed.FrameRate,
 				"video_codec":    entry.fileParsed.VideoCodec,
 				"audio_codec":    entry.fileParsed.AudioCodec,

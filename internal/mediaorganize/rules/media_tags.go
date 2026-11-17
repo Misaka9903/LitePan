@@ -36,6 +36,8 @@ func EnrichMediaTagsFromFilename(name string, m map[string]any) {
 	}
 	scanned := scanMediaTagsFromStem(stem)
 	mergeScannedScreenSize(m, scanned.screenSize)
+	mergeScannedString(m, "hdr", scanned.hdr)
+	mergeScannedString(m, "bit_depth", scanned.bitDepth)
 	mergeScannedString(m, "frame_rate", scanned.frameRate)
 	mergeScannedString(m, "video_codec", scanned.videoCodec)
 	mergeScannedAudioCodec(m, scanned.audioCodec)
@@ -107,7 +109,8 @@ func enrichParsedMediaTags(name string, p ParsedMedia) ParsedMedia {
 
 // mediaTagProbeKeys 是「探测真实文件头」可以提供的标签键。
 var mediaTagProbeKeys = map[string]struct{}{
-	"screen_size": {}, "frame_rate": {}, "video_codec": {}, "audio_codec": {}, "audio_channels": {},
+	"screen_size": {}, "hdr": {}, "bit_depth": {}, "frame_rate": {},
+	"video_codec": {}, "audio_codec": {}, "audio_channels": {},
 }
 
 // MergeProbedTags 把探测到的标签合并进文件名解析结果。
@@ -147,6 +150,8 @@ func mediaTagEmpty(m map[string]any, key string) bool {
 
 type mediaTagScanResult struct {
 	screenSize    string
+	hdr           string
+	bitDepth      string
 	frameRate     string
 	videoCodec    string
 	audioCodec    string
@@ -171,6 +176,14 @@ func scanMediaTagsFromStem(stem string) mediaTagScanResult {
 			if rank > screenRank {
 				screenRank = rank
 				out.screenSize = value
+			}
+		case "hdr":
+			if out.hdr == "" {
+				out.hdr = value
+			}
+		case "bit_depth":
+			if out.bitDepth == "" {
+				out.bitDepth = value
 			}
 		case "frame_rate":
 			if out.frameRate == "" {
@@ -263,6 +276,12 @@ func classifyQualityToken(raw string) (field, value string, rank int) {
 
 	if size, r := classifyScreenSizeToken(token); size != "" {
 		return "screen_size", size, r
+	}
+	if hdr := classifyHDRToken(token); hdr != "" {
+		return "hdr", hdr, 0
+	}
+	if bd := classifyBitDepthToken(token); bd != "" {
+		return "bit_depth", bd, 0
 	}
 	if ch := classifyChannelToken(token); ch != "" {
 		return "audio_channels", ch, 0
@@ -388,4 +407,36 @@ func screenSizeRank(token string) int {
 	default:
 		return 0
 	}
+}
+
+// classifyHDRToken 识别文件名里的动态范围标记。
+func classifyHDRToken(raw string) string {
+	t := strings.ToLower(strings.NewReplacer(".", "", "_", "", "-", "", " ", "").Replace(strings.TrimSpace(raw)))
+	switch t {
+	case "dovi", "dolbyvision", "dv":
+		return "DoVi"
+	case "hdr10+", "hdr10plus", "hdr10p":
+		return "HDR10+"
+	case "hdr10", "hdr":
+		return "HDR10"
+	case "hlg":
+		return "HLG"
+	case "sdr":
+		return "SDR"
+	}
+	return ""
+}
+
+// classifyBitDepthToken 识别文件名里的色深标记。
+func classifyBitDepthToken(raw string) string {
+	t := strings.ToLower(strings.NewReplacer(".", "", "_", "", "-", "", " ", "").Replace(strings.TrimSpace(raw)))
+	switch t {
+	case "10bit", "10bits", "hi10p":
+		return "10-bit"
+	case "12bit", "12bits":
+		return "12-bit"
+	case "8bit", "8bits":
+		return "8-bit"
+	}
+	return ""
 }

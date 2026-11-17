@@ -6,6 +6,8 @@ type ParsedMedia struct {
 	Season        *int
 	Episode       *int
 	ScreenSize    string
+	HDR           string
+	BitDepth      string
 	FrameRate     string
 	VideoCodec    string
 	AudioCodec    string
@@ -61,6 +63,8 @@ func parsedFromMap(m map[string]any) ParsedMedia {
 	out := ParsedMedia{
 		Title:         strVal(m["title"]),
 		ScreenSize:    strVal(m["screen_size"]),
+		HDR:           strVal(m["hdr"]),
+		BitDepth:      strVal(m["bit_depth"]),
 		FrameRate:     strVal(m["frame_rate"]),
 		VideoCodec:    strVal(m["video_codec"]),
 		AudioCodec:    strVal(m["audio_codec"]),
@@ -92,6 +96,12 @@ func (p ParsedMedia) ToMap() map[string]any {
 	}
 	if p.ScreenSize != "" {
 		m["screen_size"] = p.ScreenSize
+	}
+	if p.HDR != "" {
+		m["hdr"] = p.HDR
+	}
+	if p.BitDepth != "" {
+		m["bit_depth"] = p.BitDepth
 	}
 	if p.FrameRate != "" {
 		m["frame_rate"] = p.FrameRate
