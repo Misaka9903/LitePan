@@ -110,6 +110,7 @@ export interface MediaOrganizeSettings {
   align_media_tags: boolean;
   probe_enabled: boolean;
   skip_mixed_ext: boolean;
+  skip_mixed_quality: boolean;
   max_works_per_run: number;
   overwrite_existing: boolean;
 }

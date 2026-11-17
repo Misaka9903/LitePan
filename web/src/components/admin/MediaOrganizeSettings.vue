@@ -99,6 +99,7 @@ const {
   align_media_tags: false,
   probe_enabled: false,
   skip_mixed_ext: true,
+  skip_mixed_quality: true,
   max_works_per_run: 50,
   overwrite_existing: false,
 });
@@ -509,6 +510,21 @@ defineExpose(
           </template>
           <template #control>
             <SettingsBoolSegment v-model="settings.probe_enabled" label="媒体信息提取命名" />
+          </template>
+        </SettingsRow>
+
+        <SettingsRow :show-changed-badge="true" :changed="isFieldChanged('skip_mixed_quality')">
+          <template #info>
+            <div class="settings-row__label">
+              <span>画质不一致时跳过整部剧</span>
+              <SettingsHelpTooltip title="画质不一致说明">
+                <p>同一季里文件名声明的分辨率/编码不一致（如 2160p 与 1080p 混装）时，整部剧不做任何操作。</p>
+                <p>只统计文件名写了画质的文件；整季都没写则不拦截。特典不参与判定。</p>
+              </SettingsHelpTooltip>
+            </div>
+          </template>
+          <template #control>
+            <SettingsBoolSegment v-model="settings.skip_mixed_quality" label="画质不一致时跳过整部剧" />
           </template>
         </SettingsRow>
 

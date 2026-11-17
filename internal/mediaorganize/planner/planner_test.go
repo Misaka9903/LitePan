@@ -1665,7 +1665,7 @@ func TestPlanEpisodeRangeDirectories(t *testing.T) {
 			RenameMarker:      "off",
 			Recursive:         true,
 		},
-		nil,
+		planner.Settings{"mo_skip_mixed_quality": "false"},
 		"task-test",
 		nil,
 		func(string) {},

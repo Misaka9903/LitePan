@@ -75,6 +75,8 @@ func (p *Planner) planBatch(entries []batchEntry, label string) error {
 
 	// 整部剧的扩展名一致性检查（只影响剧集，电影不判定）
 	p.applyMixedExtensionGuard(groups)
+	// 整部剧的画质一致性检查（同样只影响剧集）
+	p.applyMixedQualityGuard(groups)
 
 	alignDefaults := map[groupKey]map[bucketKey]map[string]any{}
 	if p.alignMediaTags {

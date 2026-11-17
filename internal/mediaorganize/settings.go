@@ -28,6 +28,7 @@ var moSettingFieldToKey = map[string]string{
 	"align_media_tags":         settings.KeyMOAlignMediaTags,
 	"probe_enabled":            settings.KeyMOProbeEnabled,
 	"skip_mixed_ext":           settings.KeyMOSkipMixedExt,
+	"skip_mixed_quality":       settings.KeyMOSkipMixedQuality,
 	"max_works_per_run":        settings.KeyMOMaxWorksPerRun,
 	"overwrite_existing":       settings.KeyMOOverwriteExisting,
 }
@@ -44,7 +45,7 @@ func SettingsDict(svc *settings.Service) map[string]any {
 	out := make(map[string]any, len(moSettingFieldToKey))
 	for field, key := range moSettingFieldToKey {
 		switch field {
-		case "proxy_enabled", "align_media_tags", "overwrite_existing", "probe_enabled", "skip_mixed_ext":
+		case "proxy_enabled", "align_media_tags", "overwrite_existing", "probe_enabled", "skip_mixed_ext", "skip_mixed_quality":
 			out[field] = svc.Bool(key)
 		case "api_request_interval_ms", "tmdb_request_interval_ms", "max_works_per_run":
 			out[field] = svc.Int(key)
@@ -142,7 +143,7 @@ func parseMediaTagOrder(raw any) (json.RawMessage, error) {
 
 func anyToSettingString(field string, raw any) (string, error) {
 	switch field {
-	case "proxy_enabled", "align_media_tags", "overwrite_existing", "probe_enabled", "skip_mixed_ext":
+	case "proxy_enabled", "align_media_tags", "overwrite_existing", "probe_enabled", "skip_mixed_ext", "skip_mixed_quality":
 		b, ok := raw.(bool)
 		if !ok {
 			return "", fmt.Errorf("%s 需为布尔值", field)

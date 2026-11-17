@@ -51,7 +51,8 @@ type Planner struct {
 	prober         MediaProber
 	probeMode      string
 	// skipMixedExt 为真时，同一季混用多种媒体扩展名的剧整部跳过。
-	skipMixedExt bool
+	skipMixedExt     bool
+	skipMixedQuality bool
 	// probeSeen 记录本次计划里已写过日志的探测桶，避免整季刷屏。
 	probeSeen         map[string]struct{}
 	actionType        string
@@ -151,6 +152,7 @@ func (p *Planner) loadSettings() {
 
 	// 默认开启：混装季的标签与命名都不可靠，宁可停下来让用户看一眼。
 	p.skipMixedExt = rules.SettingBool(p.settings["mo_skip_mixed_ext"], true)
+	p.skipMixedQuality = rules.SettingBool(p.settings["mo_skip_mixed_quality"], true)
 
 	// 探测默认关闭：读文件头会给网盘带来额外请求，不能让升级后的整理任务凭空变慢。
 	// 探测只有开/关：开启即以文件头为准（原「探测优先」），不再提供模式选择。
@@ -631,4 +633,11 @@ func (p *Planner) isLowConfidenceGroup(key groupKey, items []batchEntry) bool {
 // groupUIDOf 生成组的稳定标识，供手动匹配绑定使用。
 func groupUIDOf(key groupKey) string {
 	return fmt.Sprintf("%s|%s|%s|%s", key.mediaKind, key.dirID, key.dirName, key.title)
+}
+
+// logLine 安全输出计划日志：未注入日志函数时静默跳过（测试常直接构造 Planner）。
+func (p *Planner) logLine(msg string) {
+	if p.log != nil {
+		p.log(msg)
+	}
 }

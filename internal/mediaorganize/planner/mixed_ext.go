@@ -37,7 +37,7 @@ func (p *Planner) applyMixedExtensionGuard(groups map[groupKey][]batchEntry) {
 			label = "未识别标题"
 		}
 		reason := fmt.Sprintf("%s：%s，已跳过整部剧", label, detail)
-		p.log("[计划] 跳过整部剧：" + reason)
+		p.logLine("[计划] 跳过整部剧：" + reason)
 		for _, key := range victims {
 			for _, entry := range groups[key] {
 				p.skip(entry.item, reason)
