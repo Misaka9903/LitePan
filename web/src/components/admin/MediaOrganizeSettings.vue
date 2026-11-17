@@ -40,7 +40,6 @@ const tmdbLanguageOptions = [
 const probeModeOptions = [
   { value: "prefer", label: "探测优先（推荐）" },
   { value: "fill", label: "只补空缺" },
-  { value: "force", label: "全部以探测为准" },
 ];
 
 const conflictPolicyOptions = [
@@ -558,7 +557,6 @@ defineExpose(
               <SettingsHelpTooltip title="探测结果与文件名冲突时说明">
                 <p>只补空缺：文件名已有的标签不覆盖；标签已齐全时不会探测，不产生任何读取。</p>
                 <p>探测优先：以文件头为准，探测不到的字段保留文件名结果。</p>
-                <p>全部以探测为准：WEB-DL、BluRay 这类来源信息不在文件头里，会被丢掉。</p>
               </SettingsHelpTooltip>
             </div>
           </template>

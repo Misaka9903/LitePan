@@ -156,7 +156,8 @@ func (p *Planner) loadSettings() {
 	p.probeMode = strings.ToLower(strings.TrimSpace(strSetting(p.settings, "mo_probe_mode", "prefer")))
 	if !rules.SettingBool(p.settings["mo_probe_enabled"], false) {
 		p.probeMode = "off"
-	} else if p.probeMode != "fill" && p.probeMode != "prefer" && p.probeMode != "force" {
+	} else if p.probeMode != "fill" && p.probeMode != "prefer" {
+		// 旧配置里的 "force" 同 "prefer"，一并收敛。
 		p.probeMode = "prefer"
 	}
 
