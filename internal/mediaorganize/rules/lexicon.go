@@ -12,7 +12,7 @@ var MediaTagFields = []string{
 }
 
 var DefaultMediaTagOrder = []string{
-	"screen_size", "hdr", "bit_depth", "frame_rate", "video_codec", "audio_codec", "audio_channels",
+	"screen_size", "hdr", "video_codec", "bit_depth", "frame_rate", "audio_codec", "audio_channels",
 }
 
 var GenericMediaDirNames = map[string]struct{}{
