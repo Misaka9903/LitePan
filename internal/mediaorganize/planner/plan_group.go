@@ -539,9 +539,9 @@ func chooseTargetDirName(needsRename bool, oldName, newName string) string {
 func composeFilename(base, mediaTag, ext string) string {
 	if mediaTag != "" {
 		if ext != "" {
-			return base + " " + mediaTag + "." + ext
+			return base + "." + mediaTag + "." + ext
 		}
-		return base + " " + mediaTag
+		return base + "." + mediaTag
 	}
 	if ext != "" {
 		return base + "." + ext

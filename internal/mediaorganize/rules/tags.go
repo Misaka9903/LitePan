@@ -162,10 +162,9 @@ func BuildMediaInfoTags(parsed ParsedMedia, tagOrder []string) string {
 		if s == "" {
 			continue
 		}
-		if key == "frame_rate" {
-			if !containsStr(parts, s) {
-				parts = append(parts, s)
-			}
+		// 声道并入前一段音轨编码，写成 "AAC 2.0"；前面没有编码时独立成段。
+		if key == "audio_channels" && len(parts) > 0 {
+			parts[len(parts)-1] = parts[len(parts)-1] + " " + s
 			continue
 		}
 		if !containsStr(parts, s) {
@@ -175,7 +174,7 @@ func BuildMediaInfoTags(parsed ParsedMedia, tagOrder []string) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	return "[" + strings.Join(parts, " ") + "]"
+	return strings.Join(parts, ".")
 }
 
 func containsStr(list []string, s string) bool {

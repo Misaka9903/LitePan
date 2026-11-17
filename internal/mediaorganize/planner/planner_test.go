@@ -1371,7 +1371,7 @@ func TestMovePlanSkipsAlreadyOrganizedTVFileWhenTargetExists(t *testing.T) {
 		"season1":        {{ID: "ep01", Name: filename}},
 		"target":         {{ID: "target_show", Name: "钢铁森林 (2026) {tmdb-281392}", IsDir: true}},
 		"target_show":    {{ID: "target_season1", Name: "Season 01", IsDir: true}},
-		"target_season1": {{ID: "existing_ep01", Name: filename}},
+		"target_season1": {{ID: "existing_ep01", Name: "钢铁森林.2026.S01E01.2160p.H.265.DDP 5.1.mkv"}},
 	}}
 	p := planner.New(
 		context.Background(),
@@ -1434,7 +1434,7 @@ func TestMovePlanMarksOverwriteTargetWhenTargetExists(t *testing.T) {
 		"season1":        {{ID: "ep01", Name: filename}},
 		"target":         {{ID: "target_show", Name: "钢铁森林 (2026) {tmdb-281392}", IsDir: true}},
 		"target_show":    {{ID: "target_season1", Name: "Season 01", IsDir: true}},
-		"target_season1": {{ID: "existing_ep01", Name: filename}},
+		"target_season1": {{ID: "existing_ep01", Name: "钢铁森林.2026.S01E01.2160p.H.265.DDP 5.1.mkv"}},
 	}}
 	p := planner.New(
 		context.Background(),
