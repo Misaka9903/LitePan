@@ -165,8 +165,8 @@ func IsAlreadyOrganized(filename, marker string) bool {
 }
 
 func looksLikeOrganizedStructure(filename string) bool {
-	name := strings.TrimSpace(filename)
-	return organizedStructureRe.MatchString(name) || organizedStructureReV2.MatchString(name)
+	// 只认点分隔的新格式；旧的「标题 (年份) S01E01 [标签]」视为未整理，便于整库统一重排。
+	return organizedStructureReV2.MatchString(strings.TrimSpace(filename))
 }
 
 func IsMarkerOff(marker string) bool {

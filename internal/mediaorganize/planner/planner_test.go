@@ -762,7 +762,7 @@ func TestRenamePlanSkipsAlreadyOrganizedTVFiles(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		files = append(files, domain.FileItem{
 			ID:   fmt.Sprintf("ep%02d", i),
-			Name: fmt.Sprintf("钢铁森林 (2026) S01E%02d [2160p H.265 DDP 5.1].mkv", i),
+			Name: fmt.Sprintf("钢铁森林.2026.S01E%02d.2160p.H.265.DDP 5.1.mkv", i),
 		})
 	}
 	fs := &mockFS{dirs: map[string][]domain.FileItem{
@@ -1119,7 +1119,7 @@ func TestRenamePlanReportsMissingTMDBForStructuredMovieDir(t *testing.T) {
 		"root": {{ID: "movie", Name: "东北警察故事2 (2023)", IsDir: true}},
 		"movie": {{
 			ID:   "f1",
-			Name: "东北警察故事2 (2023) [2160p H.265 DDP 5.1].mkv",
+			Name: "东北警察故事2.2023.2160p.H.265.DDP 5.1.mkv",
 		}},
 	}}
 	p := planner.New(
@@ -1218,7 +1218,7 @@ func TestRenamePlanSkipsAlreadyOrganizedTVFilesWhenTMDBFails(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		files = append(files, domain.FileItem{
 			ID:   fmt.Sprintf("ep%02d", i),
-			Name: fmt.Sprintf("钢铁森林 (2026) S01E%02d [2160p H.265 DDP 5.1].mkv", i),
+			Name: fmt.Sprintf("钢铁森林.2026.S01E%02d.2160p.H.265.DDP 5.1.mkv", i),
 		})
 	}
 	fs := &mockFS{dirs: map[string][]domain.FileItem{
@@ -1303,7 +1303,7 @@ func TestMovePlanMovesAlreadyOrganizedTVFilesToEmptyTarget(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		files = append(files, domain.FileItem{
 			ID:   fmt.Sprintf("ep%02d", i),
-			Name: fmt.Sprintf("钢铁森林 (2026) S01E%02d [2160p H.265 DDP 5.1].mkv", i),
+			Name: fmt.Sprintf("钢铁森林.2026.S01E%02d.2160p.H.265.DDP 5.1.mkv", i),
 		})
 	}
 	fs := &mockFS{dirs: map[string][]domain.FileItem{

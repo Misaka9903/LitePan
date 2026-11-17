@@ -41,9 +41,8 @@ func TestBuildMediaInfoTagsDotJoined(t *testing.T) {
 	}
 }
 
-func TestLooksLikeOrganizedAcceptsBothLayouts(t *testing.T) {
+func TestLooksLikeOrganizedOnlyAcceptsDotLayout(t *testing.T) {
 	cases := []string{
-		"德鲁纳酒店 (2019) S01E01 [2160p H.265 AAC 2.0].mkv",
 		"德鲁纳酒店.2019.S01E01.2160p.H.265.AAC 2.0.mkv",
 		"疯狂动物城.2016.mkv",
 	}
@@ -52,8 +51,14 @@ func TestLooksLikeOrganizedAcceptsBothLayouts(t *testing.T) {
 			t.Fatalf("应认定为已整理: %q", c)
 		}
 	}
-	if looksLikeOrganizedStructure("德鲁纳酒店 S01E01 无年份.mkv") {
-		t.Fatal("缺年份的原始文件名不应算已整理")
+	legacy := []string{
+		"德鲁纳酒店 (2019) S01E01 [2160p H.265 AAC 2.0].mkv",
+		"德鲁纳酒店 S01E01 无年份.mkv",
+	}
+	for _, c := range legacy {
+		if looksLikeOrganizedStructure(c) {
+			t.Fatalf("旧格式不应再算已整理: %q", c)
+		}
 	}
 }
 
