@@ -499,7 +499,7 @@ onMounted(async () => {
           <option value="season">按目录</option>
         </select>
       </label>
-      <label class="audit-unit" :title="`按「目录整理 → 媒体信息顺序」判定文件名里有没有分辨率/编码，并检查同季扩展名是否混用（当前检查：${requiredLabel}）`">
+      <label class="audit-unit" :title="`按「目录整理 → 媒体信息顺序」判定文件名里的媒体标签是否齐全，并检查同季扩展名是否混用（当前检查：${requiredLabel}）`">
         <input v-model="checkMediaInfo" type="checkbox" />
         查媒体信息
       </label>
