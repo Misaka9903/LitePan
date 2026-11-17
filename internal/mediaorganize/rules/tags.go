@@ -30,6 +30,10 @@ func NormalizeMediaTagValue(key string, value any) any {
 		return normalizeAudioCodec(fmt.Sprint(value))
 	case "audio_channels":
 		return fmt.Sprint(value)
+	case "hdr":
+		return normalizeDynamicRange(fmt.Sprint(value))
+	case "bit_depth":
+		return normalizeBitDepth(fmt.Sprint(value))
 	default:
 		return fmt.Sprint(value)
 	}
@@ -184,4 +188,34 @@ func containsStr(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+func normalizeDynamicRange(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "dovi", "dolby vision", "dv":
+		return "DoVi"
+	case "hdr10+", "hdr10plus":
+		return "HDR10+"
+	case "hdr10", "hdr":
+		return "HDR10"
+	case "hlg":
+		return "HLG"
+	case "sdr":
+		return "SDR"
+	default:
+		return strings.TrimSpace(v)
+	}
+}
+
+func normalizeBitDepth(v string) string {
+	raw := strings.ToLower(strings.TrimSpace(v))
+	if raw == "" {
+		return ""
+	}
+	for _, n := range []string{"8", "10", "12", "16"} {
+		if strings.HasPrefix(raw, n) {
+			return n + "-bit"
+		}
+	}
+	return raw
 }

@@ -20,9 +20,11 @@ import { runTmdbTest } from "@/composables/useTmdbTest";
 import "@/styles/admin-shared.css";
 
 const ORGANIZE_SETTINGS_ACCENT = "#10b981";
-const ALL_TAG_KEYS = ["screen_size", "frame_rate", "video_codec", "audio_codec", "audio_channels"] as const;
+const ALL_TAG_KEYS = ["screen_size", "hdr", "bit_depth", "frame_rate", "video_codec", "audio_codec", "audio_channels"] as const;
 const TAG_LABELS: Record<string, string> = {
   screen_size: "分辨率",
+  hdr: "动态范围",
+  bit_depth: "色深",
   frame_rate: "帧率",
   video_codec: "视频编码",
   audio_codec: "音频编码",

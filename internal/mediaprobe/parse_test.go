@@ -42,12 +42,12 @@ func TestParseOutput(t *testing.T) {
 		{
 			name: "4K HEVC + DTS-HD MA 音轨优先取默认",
 			in:   out4KDTSHD,
-			want: Info{ScreenSize: "2160p", FrameRate: "23.976", VideoCodec: "H.265", AudioCodec: "DTS-HD MA", AudioChannels: "7.1"},
+			want: Info{ScreenSize: "2160p", HDR: "HDR10", BitDepth: "10-bit", FrameRate: "23.976", VideoCodec: "H.265", AudioCodec: "DTS-HD MA", AudioChannels: "7.1"},
 		},
 		{
 			name: "封面流不能盖掉正片",
 			in:   outCoverAAC,
-			want: Info{ScreenSize: "1080p", FrameRate: "25", VideoCodec: "H.264", AudioCodec: "AAC", AudioChannels: "2.0"},
+			want: Info{ScreenSize: "1080p", HDR: "SDR", BitDepth: "8-bit", FrameRate: "25", VideoCodec: "H.264", AudioCodec: "AAC", AudioChannels: "2.0"},
 		},
 		{
 			name: "默认音轨优先于首条音轨",
@@ -57,12 +57,12 @@ func TestParseOutput(t *testing.T) {
 		{
 			name: "无音轨时音频标签留空",
 			in:   outSilent,
-			want: Info{ScreenSize: "2160p", FrameRate: "59.94", VideoCodec: "AV1"},
+			want: Info{ScreenSize: "2160p", HDR: "SDR", BitDepth: "8-bit", FrameRate: "59.94", VideoCodec: "AV1"},
 		},
 		{
 			name: "DVD 分辨率与不认识的编码",
 			in:   outSD,
-			want: Info{ScreenSize: "480p", FrameRate: "29.97", AudioCodec: "MP3", AudioChannels: "2.0"},
+			want: Info{ScreenSize: "480p", HDR: "SDR", BitDepth: "8-bit", FrameRate: "29.97", AudioCodec: "MP3", AudioChannels: "2.0"},
 		},
 		{
 			name: "无流信息时为空",
@@ -84,8 +84,8 @@ func TestParseOutputEmpty(t *testing.T) {
 	if !ParseOutput("").Empty() {
 		t.Fatal("空输入应当被判定为无可用信息")
 	}
-	if got := ParseOutput(out4KDTSHD).Tags(); len(got) != 5 {
-		t.Fatalf("Tags() 应返回 5 个字段，实际 %d: %v", len(got), got)
+	if got := ParseOutput(out4KDTSHD).Tags(); len(got) != 7 {
+		t.Fatalf("Tags() 应返回 7 个字段，实际 %d: %v", len(got), got)
 	}
 }
 
@@ -147,5 +147,62 @@ func TestParseChannels(t *testing.T) {
 		if got := parseChannels(in); got != want {
 			t.Fatalf("parseChannels(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestParseDynamicRangeAndBitDepth(t *testing.T) {
+	cases := []struct {
+		name     string
+		in       string
+		wantHDR  string
+		wantBits string
+	}{
+		{
+			name:     "HDR10 10bit",
+			in:       "  Stream #0:0: Video: hevc (Main 10), yuv420p10le(tv, bt2020nc/bt2020/smpte2084), 3840x2160, 23.98 fps",
+			wantHDR:  "HDR10",
+			wantBits: "10-bit",
+		},
+		{
+			name:     "HLG",
+			in:       "  Stream #0:0: Video: hevc (Main 10), yuv420p10le(tv, bt2020nc/bt2020/arib-std-b67), 3840x2160, 25 fps",
+			wantHDR:  "HLG",
+			wantBits: "10-bit",
+		},
+		{
+			name:     "HDR10+ side data",
+			in:       "  Stream #0:0: Video: hevc (Main 10), yuv420p10le(tv, bt2020nc/bt2020/smpte2084), 3840x2160, 23.98 fps\n    Side data:\n      HDR Dynamic Metadata SMPTE2094-40",
+			wantHDR:  "HDR10+",
+			wantBits: "10-bit",
+		},
+		{
+			name:     "DoVi P8",
+			in:       "  Stream #0:0: Video: hevc (Main 10), yuv420p10le(tv, bt2020nc/bt2020/smpte2084), 3840x2160, 23.98 fps\n    Side data:\n      DOVI configuration record: version: 1.0, profile: 8",
+			wantHDR:  "DoVi",
+			wantBits: "10-bit",
+		},
+		{
+			name:     "SDR 8bit",
+			in:       "  Stream #0:0: Video: h264 (High), yuv420p(tv, bt709), 1920x1080, 25 fps",
+			wantHDR:  "SDR",
+			wantBits: "8-bit",
+		},
+		{
+			name:     "12bit",
+			in:       "  Stream #0:0: Video: hevc (Main 12), yuv420p12le(tv, bt2020nc/bt2020/smpte2084), 3840x2160, 23.98 fps",
+			wantHDR:  "HDR10",
+			wantBits: "12-bit",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ParseOutput(tc.in)
+			if got.HDR != tc.wantHDR {
+				t.Fatalf("HDR = %q, want %q", got.HDR, tc.wantHDR)
+			}
+			if got.BitDepth != tc.wantBits {
+				t.Fatalf("BitDepth = %q, want %q", got.BitDepth, tc.wantBits)
+			}
+		})
 	}
 }

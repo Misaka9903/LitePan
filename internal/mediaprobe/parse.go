@@ -10,6 +10,8 @@ import (
 // Info 是一次探测得到的媒体信息，字段与「媒体信息标签排序」使用的标签一一对应。
 type Info struct {
 	ScreenSize    string
+	HDR           string
+	BitDepth      string
 	FrameRate     string
 	VideoCodec    string
 	AudioCodec    string
@@ -18,13 +20,15 @@ type Info struct {
 
 // Tags 转成标签表，键与 media_tag_order 一致；探测不到的字段不出现在表中。
 func (i Info) Tags() map[string]string {
-	out := make(map[string]string, 5)
+	out := make(map[string]string, 7)
 	put := func(key, value string) {
 		if v := strings.TrimSpace(value); v != "" {
 			out[key] = v
 		}
 	}
 	put("screen_size", i.ScreenSize)
+	put("hdr", i.HDR)
+	put("bit_depth", i.BitDepth)
 	put("frame_rate", i.FrameRate)
 	put("video_codec", i.VideoCodec)
 	put("audio_codec", i.AudioCodec)
@@ -56,6 +60,7 @@ type audioCandidate struct {
 func ParseOutput(stderr string) Info {
 	var out Info
 	bestArea := -1
+	bestRest := ""
 	audios := make([]audioCandidate, 0, 2)
 
 	for _, m := range streamLineRe.FindAllStringSubmatch(stderr, -1) {
@@ -72,6 +77,7 @@ func ParseOutput(stderr string) Info {
 			}
 			if area := width * height; area > bestArea {
 				bestArea = area
+				bestRest = rest
 				out.ScreenSize = ScreenSizeFromDimensions(width, height)
 				out.VideoCodec = normalizeVideoCodec(codec)
 				out.FrameRate = parseFrameRate(rest)
@@ -89,7 +95,53 @@ func ParseOutput(stderr string) Info {
 		out.AudioCodec = normalizeAudioCodec(picked.codec, picked.rest)
 		out.AudioChannels = parseChannels(picked.rest)
 	}
+	if bestRest != "" {
+		out.BitDepth = parseBitDepth(bestRest)
+		out.HDR = parseDynamicRange(stderr)
+	}
 	return out
+}
+
+var pixFmtRe = regexp.MustCompile(`\b(yuvj?\d{3}p\d{0,2}(?:le|be)?|yuva\d{3}p\d{0,2}(?:le|be)?|gbrp\d{0,2}(?:le|be)?|p0\d{2}[a-z]*|p2\d{2}[a-z]*|p4\d{2}[a-z]*|nv12|nv16|nv21)\b`)
+
+// parseBitDepth 从 pix_fmt 推断色深。ffmpeg -i 不会单独给位深，只能看像素格式后缀。
+func parseBitDepth(rest string) string {
+	m := pixFmtRe.FindStringSubmatch(rest)
+	if len(m) < 2 {
+		return ""
+	}
+	pf := strings.ToLower(m[1])
+	switch {
+	case strings.Contains(pf, "12le"), strings.Contains(pf, "12be"),
+		strings.Contains(pf, "p012"), strings.Contains(pf, "p212"), strings.Contains(pf, "p412"):
+		return "12-bit"
+	case strings.Contains(pf, "10le"), strings.Contains(pf, "10be"),
+		strings.Contains(pf, "p010"), strings.Contains(pf, "p210"), strings.Contains(pf, "p410"):
+		return "10-bit"
+	default:
+		return "8-bit"
+	}
+}
+
+// parseDynamicRange 判定动态范围：DoVi > HDR10+ > HLG > HDR10 > SDR。
+// 无法从像素格式确认 HDR 的文件按 SDR 处理。
+func parseDynamicRange(stderr string) string {
+	lower := strings.ToLower(stderr)
+	switch {
+	case strings.Contains(lower, "dovi configuration record"),
+		strings.Contains(lower, "dvhe"),
+		strings.Contains(lower, "dvh1"),
+		strings.Contains(lower, "dvav"):
+		return "DoVi"
+	case strings.Contains(lower, "smpte2094-40"), strings.Contains(lower, "hdr10+"):
+		return "HDR10+"
+	case strings.Contains(lower, "arib-std-b67"):
+		return "HLG"
+	case strings.Contains(lower, "smpte2084"):
+		return "HDR10"
+	default:
+		return "SDR"
+	}
 }
 
 // pickAudio 优先取 ffmpeg 标记为默认的音轨，否则取第一条。
