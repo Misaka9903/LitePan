@@ -110,6 +110,11 @@ func New(opts Options) (*Service, error) {
 	if binary, err := findProbeBinary(opts.DataDir); err == nil {
 		s.binary = binary
 		s.useJSON = strings.Contains(filepath.Base(binary), "ffprobe")
+		if s.useJSON {
+			log.Info("媒体信息探测使用 ffprobe（JSON）", "path", binary)
+		} else {
+			log.Warn("媒体信息探测回退 ffmpeg 文本解析：未找到 ffprobe，动态范围/色深可能不准", "path", binary)
+		}
 	} else {
 		log.Info("媒体信息探测不可用：未找到 ffprobe/ffmpeg", "error", err)
 	}
