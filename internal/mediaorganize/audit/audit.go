@@ -19,8 +19,8 @@ const defaultExts = "mkv;mp4;avi;ts;mov;wmv;iso;m2ts;rmvb;flv;m4v;webm"
 
 // validKeys 允许出现在 Required 里的媒体标签键，与媒体信息顺序保持一致。
 var validKeys = map[string]struct{}{
-	"screen_size": {}, "frame_rate": {}, "video_codec": {},
-	"audio_codec": {}, "audio_channels": {},
+	"screen_size": {}, "hdr": {}, "bit_depth": {}, "frame_rate": {},
+	"video_codec": {}, "audio_codec": {}, "audio_channels": {},
 }
 
 // Node 是同构目录树的一个节点。

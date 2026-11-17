@@ -52,6 +52,8 @@ const checkFranchise = ref(true);
 
 const missingLabels: Record<string, string> = {
   screen_size: "分辨率",
+  hdr: "动态范围",
+  bit_depth: "色深",
   video_codec: "视频编码",
   audio_codec: "音频编码",
   audio_channels: "声道",
