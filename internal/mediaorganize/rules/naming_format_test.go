@@ -72,3 +72,19 @@ func TestFitFilenameBytesTrimsDotSegments(t *testing.T) {
 		t.Fatalf("截断后丢失扩展名: %q", got)
 	}
 }
+
+func TestBuildMediaInfoTagsAtmosAfterChannels(t *testing.T) {
+	parsed := ParsedMedia{
+		ScreenSize:    "2160p",
+		HDR:           "DoVi P8",
+		VideoCodec:    "H.265",
+		BitDepth:      "10-bit",
+		FrameRate:     "24fps",
+		AudioCodec:    "DDP Atmos",
+		AudioChannels: "5.1",
+	}
+	got := BuildMediaInfoTags(parsed, DefaultMediaTagOrder)
+	if want := "2160p.DoVi P8.H.265.10-bit.24fps.DDP 5.1 Atmos"; got != want {
+		t.Fatalf("标签串 = %q, want %q", got, want)
+	}
+}

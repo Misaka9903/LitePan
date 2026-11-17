@@ -72,7 +72,12 @@ func normalizeVideoCodec(v string) string {
 var trailingVersionRe = regexp.MustCompile(`(?i)\d+\.\d+$`)
 
 func normalizeAudioCodec(v string) string {
-	v = trailingVersionRe.ReplaceAllString(strings.TrimSpace(v), "")
+	raw := strings.TrimSpace(v)
+	hasAtmos := strings.HasSuffix(strings.ToLower(raw), " atmos")
+	if hasAtmos {
+		raw = strings.TrimSpace(raw[:len(raw)-len(" atmos")])
+	}
+	v = trailingVersionRe.ReplaceAllString(raw, "")
 	v = strings.ToLower(strings.TrimSpace(v))
 	mapping := map[string]string{
 		"dolby digital plus":     "DDP",
@@ -102,13 +107,19 @@ func normalizeAudioCodec(v string) string {
 		"dolby atmos":            "",
 		"atmos":                  "",
 	}
+	out := ""
 	if mapped, ok := mapping[v]; ok {
-		return mapped
+		out = mapped
+	} else if v != "" {
+		out = strings.ToUpper(v)
 	}
-	if v == "" {
+	if out == "" {
 		return ""
 	}
-	return strings.ToUpper(v)
+	if hasAtmos {
+		out += " Atmos"
+	}
+	return out
 }
 
 func isAlphaToken(v string) bool {
@@ -168,7 +179,13 @@ func BuildMediaInfoTags(parsed ParsedMedia, tagOrder []string) string {
 		}
 		// 声道并入前一段音轨编码，写成 "AAC 2.0"；前面没有编码时独立成段。
 		if key == "audio_channels" && len(parts) > 0 {
-			parts[len(parts)-1] = parts[len(parts)-1] + " " + s
+			// Atmos 放在声道之后：DDP 5.1 Atmos，与 TgtoDrive 的写法一致。
+			last := parts[len(parts)-1]
+			if strings.HasSuffix(last, " Atmos") {
+				parts[len(parts)-1] = strings.TrimSuffix(last, " Atmos") + " " + s + " Atmos"
+			} else {
+				parts[len(parts)-1] = last + " " + s
+			}
 			continue
 		}
 		if !containsStr(parts, s) {
