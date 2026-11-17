@@ -1,6 +1,8 @@
 package mediaprobe
 
 import (
+	"encoding/json"
+	"fmt"
 	"math"
 	"regexp"
 	"strconv"
@@ -348,4 +350,170 @@ func normalizeFrameRate(raw string) string {
 	text = strings.TrimRight(text, "0")
 	text = strings.TrimRight(text, ".")
 	return text
+}
+
+// ffprobeStream 是 ffprobe -show_streams 里单个流的关键字段。
+type ffprobeStream struct {
+	CodecType        string `json:"codec_type"`
+	CodecName        string `json:"codec_name"`
+	CodecLongName    string `json:"codec_long_name"`
+	Profile          string `json:"profile"`
+	Width            int    `json:"width"`
+	Height           int    `json:"height"`
+	PixFmt           string `json:"pix_fmt"`
+	AvgFrameRate     string `json:"avg_frame_rate"`
+	RFrameRate       string `json:"r_frame_rate"`
+	Channels         int    `json:"channels"`
+	ChannelLayout    string `json:"channel_layout"`
+	ColorTransfer    string `json:"color_transfer"`
+	ColorPrimaries   string `json:"color_primaries"`
+	BitsPerRawSample string `json:"bits_per_raw_sample"`
+	SideDataList     []struct {
+		SideDataType string `json:"side_data_type"`
+	} `json:"side_data_list"`
+	Disposition struct {
+		Default int `json:"default"`
+	} `json:"disposition"`
+}
+
+// ParseJSON 解析 ffprobe -print_format json 的输出。
+func ParseJSON(data []byte) (Info, error) {
+	var doc struct {
+		Streams []ffprobeStream `json:"streams"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return Info{}, err
+	}
+	var out Info
+	bestArea := -1
+	var best *ffprobeStream
+	var audioDefault, audioFirst *ffprobeStream
+	for i := range doc.Streams {
+		st := &doc.Streams[i]
+		switch st.CodecType {
+		case "video":
+			if isImageCodec(st.CodecName) || st.Width <= 0 || st.Height <= 0 {
+				continue
+			}
+			if area := st.Width * st.Height; area > bestArea {
+				bestArea = area
+				best = st
+			}
+		case "audio":
+			if audioFirst == nil {
+				audioFirst = st
+			}
+			if audioDefault == nil && st.Disposition.Default == 1 {
+				audioDefault = st
+			}
+		}
+	}
+	if best != nil {
+		out.ScreenSize = ScreenSizeFromDimensions(best.Width, best.Height)
+		out.VideoCodec = normalizeVideoCodec(best.CodecName)
+		out.FrameRate = parseFrameRateJSON(best.AvgFrameRate, best.RFrameRate)
+		out.BitDepth = bitDepthFromStream(best)
+		out.HDR = hdrFromStream(best)
+	}
+	if a := pickAudioStream(audioDefault, audioFirst); a != nil {
+		out.AudioCodec = normalizeAudioCodec(a.CodecName, a.Profile+" "+a.CodecLongName)
+		out.AudioChannels = channelsFromJSON(a.Channels, a.ChannelLayout)
+	}
+	return out, nil
+}
+
+func pickAudioStream(preferred, fallback *ffprobeStream) *ffprobeStream {
+	if preferred != nil {
+		return preferred
+	}
+	return fallback
+}
+
+// parseFrameRateJSON 把 "24000/1001" 这类分数帧率转成标签。
+func parseFrameRateJSON(values ...string) string {
+	for _, v := range values {
+		v = strings.TrimSpace(v)
+		if v == "" || v == "0/0" {
+			continue
+		}
+		if i := strings.Index(v, "/"); i > 0 {
+			num, errN := strconv.ParseFloat(v[:i], 64)
+			den, errD := strconv.ParseFloat(v[i+1:], 64)
+			if errN == nil && errD == nil && den > 0 {
+				if s := normalizeFrameRate(fmt.Sprintf("%.3f", num/den)); s != "" {
+					return s
+				}
+			}
+			continue
+		}
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			if s := normalizeFrameRate(fmt.Sprintf("%.3f", f)); s != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+// bitDepthFromStream 优先用 bits_per_raw_sample，缺失时按 pix_fmt 推断。
+func bitDepthFromStream(st *ffprobeStream) string {
+	if n, err := strconv.Atoi(strings.TrimSpace(st.BitsPerRawSample)); err == nil {
+		switch n {
+		case 8, 10, 12, 16:
+			return fmt.Sprintf("%d-bit", n)
+		}
+	}
+	return parseBitDepth(st.PixFmt)
+}
+
+// hdrFromStream 判定动态范围：DoVi > HDR10+ > HLG > HDR10 > SDR。
+func hdrFromStream(st *ffprobeStream) string {
+	for _, sd := range st.SideDataList {
+		t := strings.ToLower(sd.SideDataType)
+		switch {
+		case strings.Contains(t, "dovi"), strings.Contains(t, "dolby vision"):
+			return "DoVi"
+		case strings.Contains(t, "hdr10+"), strings.Contains(t, "smpte2094-40"):
+			return "HDR10+"
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(st.ColorTransfer)) {
+	case "smpte2084", "smpte-st-2084":
+		return "HDR10"
+	case "arib-std-b67":
+		return "HLG"
+	}
+	return "SDR"
+}
+
+// channelsFromJSON 把声道数与布局转成 5.1 / 7.1 这类标签。
+func channelsFromJSON(n int, layout string) string {
+	switch n {
+	case 1:
+		return "1.0"
+	case 2:
+		return "2.0"
+	case 3:
+		return "2.1"
+	case 4:
+		return "4.0"
+	case 6:
+		return "5.1"
+	case 8:
+		return "7.1"
+	}
+	l := strings.ToLower(layout)
+	switch {
+	case strings.Contains(l, "7.1"):
+		return "7.1"
+	case strings.Contains(l, "5.1"):
+		return "5.1"
+	case strings.Contains(l, "quad"):
+		return "4.0"
+	case strings.Contains(l, "stereo"):
+		return "2.0"
+	case strings.Contains(l, "mono"):
+		return "1.0"
+	}
+	return ""
 }

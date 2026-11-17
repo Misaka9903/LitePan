@@ -74,12 +74,13 @@ type cacheEntry struct {
 
 // Service 读取网盘文件头补全媒体标签，并按桶缓存结果。
 type Service struct {
-	opts   Options
-	log    *slog.Logger
-	binary string
-	addr   string
-	server *http.Server
-	sem    chan struct{}
+	opts    Options
+	log     *slog.Logger
+	binary  string
+	useJSON bool
+	addr    string
+	server  *http.Server
+	sem     chan struct{}
 
 	mu     sync.Mutex
 	tokens map[string]*sourceToken
@@ -106,10 +107,11 @@ func New(opts Options) (*Service, error) {
 		tokens: make(map[string]*sourceToken),
 		cache:  make(map[string]cacheEntry),
 	}
-	if binary, err := findFFmpeg(opts.DataDir); err == nil {
+	if binary, err := findProbeBinary(opts.DataDir); err == nil {
 		s.binary = binary
+		s.useJSON = strings.Contains(filepath.Base(binary), "ffprobe")
 	} else {
-		log.Info("媒体信息探测不可用：未找到 ffmpeg", "error", err)
+		log.Info("媒体信息探测不可用：未找到 ffprobe/ffmpeg", "error", err)
 	}
 	if err := s.startServer(); err != nil {
 		return nil, err
@@ -117,19 +119,22 @@ func New(opts Options) (*Service, error) {
 	return s, nil
 }
 
-func findFFmpeg(dataDir string) (string, error) {
-	name := "ffmpeg"
-	if runtime.GOOS == "windows" {
-		name = "ffmpeg.exe"
+// findProbeBinary 优先找 ffprobe（结构化 JSON），找不到再退回 ffmpeg（文本解析）。
+func findProbeBinary(dataDir string) (string, error) {
+	for _, name := range []string{"ffprobe", "ffmpeg"} {
+		bin := name
+		if runtime.GOOS == "windows" {
+			bin = name + ".exe"
+		}
+		local := filepath.Join(dataDir, "tools", bin)
+		if st, err := os.Stat(local); err == nil && !st.IsDir() {
+			return local, nil
+		}
+		if p, err := exec.LookPath(name); err == nil {
+			return p, nil
+		}
 	}
-	local := filepath.Join(dataDir, "tools", name)
-	if st, err := os.Stat(local); err == nil && !st.IsDir() {
-		return local, nil
-	}
-	if p, err := exec.LookPath("ffmpeg"); err == nil {
-		return p, nil
-	}
-	return "", errors.New("未找到 ffmpeg，请放入 " + local)
+	return "", errors.New("未找到 ffprobe 或 ffmpeg")
 }
 
 // startServer 起一个只监听本机的取流入口。
@@ -382,6 +387,8 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 
 func (b *cappedBuffer) String() string { return string(b.data) }
 
+func (b *cappedBuffer) Bytes() []byte { return b.data }
+
 func (s *Service) probe(ctx context.Context, accountID int64, fileID string, size int64) (Info, error) {
 	if s.binary == "" {
 		return Info{}, errors.New("未找到 ffmpeg")
@@ -396,23 +403,44 @@ func (s *Service) probe(ctx context.Context, accountID int64, fileID string, siz
 	runCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 
-	// 只读文件头：没有输出参数时 ffmpeg 解析完流信息就退出，不会转码也不会下载整片。
-	var stderr cappedBuffer
-	cmd := exec.CommandContext(runCtx, s.binary,
-		"-hide_banner", "-nostdin", "-loglevel", "info",
-		"-probesize", probeWindow, "-analyzeduration", probeWindow,
-		"-i", url,
-	)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = &stderr
-	// 只看 stderr 内容，退出码无意义（缺输出参数时 ffmpeg 必定非零退出）。
-	_ = cmd.Run()
+	// 只读文件头：不指定输出，解析完流信息即退出，不会转码也不会下载整片。
+	var stdout, stderr cappedBuffer
+	var runErr error
+	if s.useJSON {
+		cmd := exec.CommandContext(runCtx, s.binary,
+			"-v", "quiet", "-print_format", "json", "-show_streams", "-show_format",
+			"-probesize", probeWindow, "-analyzeduration", "5000000",
+			url,
+		)
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		runErr = cmd.Run()
+	} else {
+		cmd := exec.CommandContext(runCtx, s.binary,
+			"-hide_banner", "-nostdin", "-loglevel", "info",
+			"-probesize", probeWindow, "-analyzeduration", probeWindow,
+			"-i", url,
+		)
+		cmd.Stdout = io.Discard
+		cmd.Stderr = &stderr
+		runErr = cmd.Run()
+	}
 
 	read, capped := s.sourceStats(token)
-	info := ParseOutput(stderr.String())
+	var info Info
+	if s.useJSON {
+		parsed, err := ParseJSON(stdout.Bytes())
+		if err != nil {
+			s.log.Info("ffprobe 输出解析失败", "file_id", fileID, "error", err.Error(), "run_error", errString(runErr))
+			return Info{}, errors.New("ffprobe 输出无法解析")
+		}
+		info = parsed
+	} else {
+		info = ParseOutput(stderr.String())
+	}
 	if info.Empty() {
 		s.log.Info("媒体信息探测未取到信息", "file_id", fileID, "read_bytes", read, "elapsed", time.Since(started).String())
-		return Info{}, errors.New("ffmpeg 未返回可用媒体信息")
+		return Info{}, errors.New("ffprobe/ffmpeg 未返回可用媒体信息")
 	}
 	s.log.Info("媒体信息探测完成", "file_id", fileID, "read_bytes", read, "elapsed", time.Since(started).String())
 	if capped {
@@ -421,4 +449,11 @@ func (s *Service) probe(ctx context.Context, accountID int64, fileID string, siz
 			"file_id", fileID, "read_bytes", read, "limit_bytes", int64(probeMaxRead))
 	}
 	return info, nil
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
