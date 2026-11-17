@@ -138,6 +138,7 @@ func (p *Planner) precheckProbeGroup(key groupKey, items []batchEntry) bool {
 	type bucket struct {
 		season int
 		ext    string
+		fileID string
 	}
 	order := make([]bucket, 0, 2)
 	byBucket := make(map[bucket][]batchEntry, 2)
@@ -148,6 +149,11 @@ func (p *Planner) precheckProbeGroup(key groupKey, items []batchEntry) bool {
 		bk := bucket{ext: strings.ToLower(path.Ext(entry.item.Name))}
 		if entry.fileParsed.Season != nil {
 			bk.season = *entry.fileParsed.Season
+		}
+		// 电影没有「同季同规格」的前提：每个文件各探一次，失败即整部不动，
+		// 不做跨文件重试（多版本之间规格本来就不同）。
+		if strings.EqualFold(strings.TrimSpace(key.mediaKind), "movie") {
+			bk.fileID = entry.item.ID
 		}
 		if _, ok := byBucket[bk]; !ok {
 			order = append(order, bk)

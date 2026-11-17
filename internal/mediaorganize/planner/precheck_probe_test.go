@@ -70,3 +70,16 @@ func TestPrecheckProbeDisabledWhenProbeOff(t *testing.T) {
 		t.Fatalf("探测关闭时不应调用探测，实际 %d", prober.calls)
 	}
 }
+
+func TestPrecheckProbeMovieNoCrossFileRetry(t *testing.T) {
+	prober := &flakyProber{fails: 1, tags: map[string]string{"screen_size": "2160p"}}
+	p := &Planner{prober: prober, probeMode: "prefer", mediaTagOrder: fullTagOrder()}
+
+	// 电影：两个版本各自成桶，第一个失败即整部不动，不会拿第二个的结果去命名第一个。
+	if p.precheckProbeGroup(groupKey{mediaKind: "movie"}, probeTestItems(2)) {
+		t.Fatal("电影任一文件探测失败应整部跳过")
+	}
+	if prober.calls != 1 {
+		t.Fatalf("电影不应跨文件重试，实际调用 %d 次", prober.calls)
+	}
+}
