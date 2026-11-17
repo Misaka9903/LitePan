@@ -43,7 +43,7 @@ let pollTimer: number | null = null;
 const report = ref<MediaAuditReport | null>(null);
 const onlyBad = ref(true);
 const unit = ref<"show" | "season">("show");
-/** 判定必填项，来自「目录整理 → 媒体信息顺序」 */
+/** 判定项，来自「目录整理 → 媒体信息顺序」 */
 const requiredTags = ref<string[]>(["screen_size", "video_codec", "audio_codec"]);
 const checkMediaInfo = ref(true);
 const checkSeasons = ref(true);
@@ -499,7 +499,7 @@ onMounted(async () => {
           <option value="season">按目录</option>
         </select>
       </label>
-      <label class="audit-unit" :title="`按「目录整理 → 媒体信息顺序」判定文件名里有没有分辨率/编码，并检查同季扩展名是否混用（当前必填：${requiredLabel}）`">
+      <label class="audit-unit" :title="`按「目录整理 → 媒体信息顺序」判定文件名里有没有分辨率/编码，并检查同季扩展名是否混用（当前检查：${requiredLabel}）`">
         <input v-model="checkMediaInfo" type="checkbox" />
         查媒体信息
       </label>
@@ -531,7 +531,7 @@ onMounted(async () => {
       <summary>体检说明</summary>
       <ul>
         <li>
-          <b>媒体信息</b>（一个开关管两项）：① 按「目录整理 → 媒体信息顺序」的必填项
+          <b>媒体信息</b>（一个开关管两项）：① 按「目录整理 → 媒体信息顺序」的检查项
           （当前：<b>{{ requiredLabel }}</b>）判定文件名里有没有这些标签，<b>缺一集就记</b>——
           整理是逐文件拼标签的，个别集缺会直接体现成同一季命名不一致，徽标上的 <b>8/24</b> 表示 24 集里有 8 集缺；
           ② 同一季混用多种媒体扩展名会标「扩展名混用」，整理时会被「扩展名不一致时跳过整部剧」挡下。
