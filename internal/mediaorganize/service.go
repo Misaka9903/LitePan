@@ -906,6 +906,7 @@ func summarizePlan(plan *Plan, aborted bool) map[string]any {
 			pending++
 		}
 	}
+	probeSkipped := 0
 	for _, item := range plan.Skipped {
 		id := stringFromAny(item["file_id"])
 		if id != "" && seen[id] {
@@ -916,8 +917,12 @@ func summarizePlan(plan *Plan, aborted bool) map[string]any {
 		}
 		total++
 		skipped++
-		if isNormalSkip("", stringFromAny(item["reason"])) {
+		reason := stringFromAny(item["reason"])
+		if isNormalSkip("", reason) {
 			normalSkipped++
+		}
+		if strings.HasPrefix(reason, "媒体信息探测失败") {
+			probeSkipped++
 		}
 	}
 	return map[string]any{
@@ -927,6 +932,7 @@ func summarizePlan(plan *Plan, aborted bool) map[string]any {
 		"skipped":          skipped,
 		"normal_skipped":   normalSkipped,
 		"abnormal_skipped": skipped - normalSkipped,
+		"probe_skipped":    probeSkipped,
 		"failed":           failed,
 		"pending":          pending,
 		"stopped":          aborted,
@@ -941,10 +947,14 @@ func formatSummaryZh(summary map[string]any) string {
 		}
 		return 0
 	}
+	probeNote := ""
+	if probe := n("probe_skipped"); probe > 0 {
+		probeNote = fmt.Sprintf("，其中探测失败 %d", probe)
+	}
 	line := fmt.Sprintf(
-		"共 %d 项，成功 %d（重命名 %d / 移动 %d），跳过 %d（无需处理 %d / 需关注 %d），失败 %d，未执行 %d",
+		"共 %d 项，成功 %d（重命名 %d / 移动 %d），跳过 %d（无需处理 %d / 需关注 %d%s），失败 %d，未执行 %d",
 		n("total"), n("renamed")+n("moved"), n("renamed"), n("moved"),
-		n("skipped"), n("normal_skipped"), n("abnormal_skipped"), n("failed"), n("pending"),
+		n("skipped"), n("normal_skipped"), n("abnormal_skipped"), probeNote, n("failed"), n("pending"),
 	)
 	if stopped, _ := summary["stopped"].(bool); stopped {
 		line += "（已中止）"
