@@ -22,20 +22,22 @@ func (p *Planner) planGroupWithMatch(
 	isTV := key.mediaKind == "tv"
 	groupUID := groupUIDOf(key)
 
-	// 探测前置：每季先探一次，失败换文件重试一次；两次都失败则整部剧不动。
-	if !p.precheckProbeGroup(key, items) {
-		for _, entry := range items {
-			p.skipInGroup(entry.item, "媒体信息探测失败，整部剧保持原样", key.title)
-		}
-		return nil
-	}
 	title := strings.TrimSpace(key.title)
 	year := key.yearPtr()
 	season := key.seasonPtr()
 
+	// 整组「格式已整理且标签齐全」直接跳过，不触发任何探测。
 	if p.isAlreadyOrganizedRenameGroup(key, items) {
 		for _, entry := range items {
 			p.skip(entry.item, "已整理")
+		}
+		return nil
+	}
+
+	// 探测前置：每季先探一次，失败换文件重试一次；两次都失败则整部剧不动。
+	if !p.precheckProbeGroup(key, items) {
+		for _, entry := range items {
+			p.skipInGroup(entry.item, "媒体信息探测失败，整部剧保持原样", key.title)
 		}
 		return nil
 	}
@@ -307,6 +309,7 @@ func (p *Planner) planGroupWithMatch(
 			continue
 		}
 		if p.actionType == "rename" && rules.IsAlreadyOrganized(entry.item.Name, p.marker) &&
+			p.mediaTagsComplete(entry.fileParsed) &&
 			!p.renameEntryNeedsPlacement(key, entry) &&
 			!p.shouldKeepStructuredFileForTMDBDir(entry, items, tmdbID) {
 			p.skip(entry.item, p.structuredSkipReason(items, tmdbID))
@@ -467,6 +470,10 @@ func (p *Planner) isAlreadyOrganizedRenameGroup(key groupKey, items []batchEntry
 	}
 	for _, entry := range items {
 		if !rules.IsAlreadyOrganized(entry.item.Name, p.marker) {
+			return false
+		}
+		// 标签不全的已整理文件仍需重新命名（补动态范围/色深等），不能整组短路。
+		if !p.mediaTagsComplete(entry.fileParsed) {
 			return false
 		}
 		if p.seasonDirNeedsStandardization(entry) || p.renameEntryNeedsPlacement(key, entry) {

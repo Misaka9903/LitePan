@@ -60,27 +60,15 @@ func TestMediaTagsComplete(t *testing.T) {
 		t.Fatal("没有任何标签时不应判定为完整")
 	}
 
+	// 没有配置标签顺序就等于没有要求，不应把文件判成「不完整」而反复重排。
 	empty := &Planner{}
-	if empty.mediaTagsComplete(completeParsed()) {
-		t.Fatal("标签顺序为空时不应判定为完整")
+	if !empty.mediaTagsComplete(completeParsed()) {
+		t.Fatal("未配置标签顺序时应视为完整")
 	}
 }
 
 func probeEntry() batchEntry {
 	return batchEntry{item: domain.FileItem{ID: "f1", Name: "Some.Show.S01E01.mkv", Size: 1024}}
-}
-
-func TestApplyMediaProbeSkipsWhenFillAndComplete(t *testing.T) {
-	prober := &countingProber{tags: map[string]string{"screen_size": "2160p"}}
-	p := &Planner{prober: prober, probeMode: "fill", mediaTagOrder: fullTagOrder()}
-
-	got := p.applyMediaProbe(completeParsed(), groupKey{mediaKind: "tv"}, probeEntry(), nil)
-	if prober.calls != 0 {
-		t.Fatalf("文件名已写全标签时不应探测，实际调用 %d 次", prober.calls)
-	}
-	if got.ScreenSize != "1080p" {
-		t.Fatalf("跳过后应保持文件名结果，得到 %q", got.ScreenSize)
-	}
 }
 
 func TestApplyMediaProbeProbesWhenFillAndIncomplete(t *testing.T) {

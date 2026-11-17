@@ -27,7 +27,6 @@ var moSettingFieldToKey = map[string]string{
 	"media_tag_order":          settings.KeyMOMediaTagOrder,
 	"align_media_tags":         settings.KeyMOAlignMediaTags,
 	"probe_enabled":            settings.KeyMOProbeEnabled,
-	"probe_mode":               settings.KeyMOProbeMode,
 	"skip_mixed_ext":           settings.KeyMOSkipMixedExt,
 	"max_works_per_run":        settings.KeyMOMaxWorksPerRun,
 	"overwrite_existing":       settings.KeyMOOverwriteExisting,

@@ -83,7 +83,6 @@ const (
 	KeyMOMediaTagOrder         = "mo_media_tag_order"
 	KeyMOAlignMediaTags        = "mo_align_media_tags"
 	KeyMOProbeEnabled          = "mo_probe_enabled"
-	KeyMOProbeMode             = "mo_probe_mode"
 	KeyMOSkipMixedExt          = "mo_skip_mixed_ext"
 	KeyMOMaxWorksPerRun        = "mo_max_works_per_run"
 	KeyMOOverwriteExisting     = "mo_overwrite_existing"
@@ -246,7 +245,6 @@ func defaultSpecs() []Spec {
 		boolSpec(KeyMOAlignMediaTags, "media_organize", "强迫症模式", "同后缀文件保持媒体信息标签一致。", "false"),
 		boolSpec(KeyMOSkipMixedExt, "media_organize", "扩展名不一致时跳过整部剧", "同一季混用多种媒体扩展名（如 mkv + mp4）时，整部剧不做任何操作，并在预览里说明原因。特典按文件名识别，不参与判定。", "true"),
 		boolSpec(KeyMOProbeEnabled, "media_organize", "媒体信息提取命名", "读取文件头补全分辨率、动态范围、色深、帧率、编码与音轨，不再只依赖文件名。剧集每季探一次、失败换文件重试一次；电影逐文件探测；失败则整部不动。默认关闭。", "false"),
-		stringSpec(KeyMOProbeMode, "media_organize", "探测结果与文件名冲突时", "fill=只补空缺；prefer=探测优先，缺失回退文件名；force=全部以探测为准。", "prefer"),
 		intSpec(KeyMOMaxWorksPerRun, "media_organize", "每次最多整理作品数", "单次执行最多处理的作品数，0 表示不限制。", "50", "", 0, 10000),
 		boolSpec(KeyMOOverwriteExisting, "media_organize", "同名冲突时覆盖", "目标位置已有同名文件时覆盖，默认跳过。", "false"),
 		{

@@ -65,7 +65,6 @@ func EnrichPlannerSettings(svc *settings.Service, api map[string]any) map[string
 	out["mo_media_tag_order"] = svc.String(settings.KeyMOMediaTagOrder)
 	out["mo_align_media_tags"] = svc.Bool(settings.KeyMOAlignMediaTags)
 	out["mo_probe_enabled"] = svc.Bool(settings.KeyMOProbeEnabled)
-	out["mo_probe_mode"] = svc.String(settings.KeyMOProbeMode)
 	out["mo_skip_mixed_ext"] = svc.Bool(settings.KeyMOSkipMixedExt)
 	out["mo_max_works_per_run"] = svc.Int(settings.KeyMOMaxWorksPerRun)
 	out["mo_overwrite_existing"] = svc.Bool(settings.KeyMOOverwriteExisting)

@@ -782,7 +782,7 @@ func TestRenamePlanSkipsAlreadyOrganizedTVFiles(t *testing.T) {
 			UseTMDB:           true,
 			Recursive:         true,
 		},
-		planner.Settings{"mo_tmdb_api_key": "test-key"},
+		planner.Settings{"mo_media_tag_order": "[\"screen_size\",\"video_codec\",\"audio_codec\"]", "mo_tmdb_api_key": "test-key"},
 		"task-test",
 		&mockTMDB{
 			lookupFn: func(id string) map[string]any {
@@ -1134,7 +1134,7 @@ func TestRenamePlanReportsMissingTMDBForStructuredMovieDir(t *testing.T) {
 			UseTMDB:           true,
 			Recursive:         true,
 		},
-		planner.Settings{"mo_tmdb_api_key": "test-key"},
+		planner.Settings{"mo_media_tag_order": "[\"screen_size\",\"video_codec\",\"audio_codec\"]", "mo_tmdb_api_key": "test-key"},
 		"task-test",
 		&mockTMDB{},
 		func(string) {},
@@ -1238,7 +1238,7 @@ func TestRenamePlanSkipsAlreadyOrganizedTVFilesWhenTMDBFails(t *testing.T) {
 			UseTMDB:           true,
 			Recursive:         true,
 		},
-		planner.Settings{"mo_tmdb_api_key": "test-key"},
+		planner.Settings{"mo_media_tag_order": "[\"screen_size\",\"video_codec\",\"audio_codec\"]", "mo_tmdb_api_key": "test-key"},
 		"task-test",
 		&mockTMDB{
 			lookupErr: errors.New("tmdb lookup unavailable"),
@@ -1270,7 +1270,7 @@ func TestRenamePlanSkipsTMDBMarkedTVFiles(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		files = append(files, domain.FileItem{
 			ID:   fmt.Sprintf("ep%02d", i),
-			Name: fmt.Sprintf("钢铁森林 (2026) {tmdb-281392} S01E%02d [2160p H.265 DDP 5.1].mkv", i),
+			Name: fmt.Sprintf("钢铁森林 (2026) {tmdb-281392} S01E%02d [2160p DoVi H.265 10bit 24fps DDP 5.1].mkv", i),
 		})
 	}
 	fs := &mockFS{dirs: map[string][]domain.FileItem{
@@ -1328,7 +1328,7 @@ func TestMovePlanMovesAlreadyOrganizedTVFilesToEmptyTarget(t *testing.T) {
 			UseTMDB:           true,
 			Recursive:         true,
 		},
-		planner.Settings{"mo_tmdb_api_key": "test-key"},
+		planner.Settings{"mo_media_tag_order": "[\"screen_size\",\"video_codec\",\"audio_codec\"]", "mo_tmdb_api_key": "test-key"},
 		"task-test",
 		&mockTMDB{
 			lookupFn: func(id string) map[string]any {

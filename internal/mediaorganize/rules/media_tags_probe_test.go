@@ -2,28 +2,6 @@ package rules
 
 import "testing"
 
-func TestMergeProbedTagsFill(t *testing.T) {
-	base := ParsedMedia{Title: "Movie", ScreenSize: "2160p", VideoCodec: "H.264"}
-	got := MergeProbedTags(base, map[string]string{
-		"screen_size":    "1080p",
-		"video_codec":    "H.265",
-		"audio_channels": "5.1",
-	}, "fill")
-
-	if got.ScreenSize != "2160p" {
-		t.Fatalf("fill 模式不应覆盖文件名已有值，得到 %q", got.ScreenSize)
-	}
-	if got.VideoCodec != "H.264" {
-		t.Fatalf("fill 模式不应覆盖文件名已有值，得到 %q", got.VideoCodec)
-	}
-	if got.AudioChannels != "5.1" {
-		t.Fatalf("fill 模式应补全空缺字段，得到 %q", got.AudioChannels)
-	}
-	if got.Title != "Movie" {
-		t.Fatalf("标题不应受影响，得到 %q", got.Title)
-	}
-}
-
 func TestMergeProbedTagsPrefer(t *testing.T) {
 	base := ParsedMedia{Title: "Movie", ScreenSize: "2160p", VideoCodec: "H.264", Source: "BluRay"}
 	got := MergeProbedTags(base, map[string]string{

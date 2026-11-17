@@ -98,7 +98,6 @@ const {
   media_tag_order: "",
   align_media_tags: false,
   probe_enabled: false,
-  probe_mode: "prefer",
   skip_mixed_ext: true,
   max_works_per_run: 50,
   overwrite_existing: false,

@@ -43,15 +43,6 @@ func (p *Planner) applyMediaProbe(parsed rules.ParsedMedia, key groupKey, entry 
 	}
 	bucket := mediaprobe.BucketKey(req)
 
-	// fill 模式下文件名已写全标签就没什么可补的，直接省掉这次文件头读取。
-	// prefer/force 的目的就是拿真实值纠正文件名，不能跳过。
-	if p.probeMode == "fill" && p.mediaTagsComplete(parsed) {
-		if p.firstProbeLog(bucket) {
-			p.probeLog("[探测] 跳过 —— 文件名已含全部标签: %s", entry.item.Name)
-		}
-		return parsed
-	}
-
 	started := time.Now()
 	tags, ok := p.prober.ProbeBucketed(ctx, req)
 	elapsed := time.Since(started)
@@ -106,7 +97,8 @@ func joinProbedTags(tags map[string]string, order []string) string {
 // 用户把某个标签从顺序里删掉，就等于不要求它，这里也随之放宽。
 func (p *Planner) mediaTagsComplete(parsed rules.ParsedMedia) bool {
 	if len(p.mediaTagOrder) == 0 {
-		return false
+		// 没有配置标签顺序就等于没有要求，不应因此把所有文件都判成「不完整」。
+		return true
 	}
 	tags := parsed.ToMap()
 	for _, key := range p.mediaTagOrder {

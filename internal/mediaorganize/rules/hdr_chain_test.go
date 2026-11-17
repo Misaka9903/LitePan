@@ -40,10 +40,4 @@ func TestMergeProbedTagsKeepsHDRAndBitDepth(t *testing.T) {
 	if tag := BuildMediaInfoTags(got, DefaultMediaTagOrder); tag != "2160p.DoVi.H.265.10-bit" {
 		t.Fatalf("标签串 = %q", tag)
 	}
-
-	// fill 模式不得覆盖已有值
-	filled := MergeProbedTags(ParsedMedia{Title: "x", HDR: "HDR10"}, map[string]string{"hdr": "DoVi"}, "fill")
-	if filled.HDR != "HDR10" {
-		t.Fatalf("fill 不应覆盖已有 HDR: %q", filled.HDR)
-	}
 }

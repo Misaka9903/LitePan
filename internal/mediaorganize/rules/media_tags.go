@@ -114,8 +114,7 @@ var mediaTagProbeKeys = map[string]struct{}{
 }
 
 // MergeProbedTags 把探测到的标签合并进文件名解析结果。
-// mode 为 "fill" 时只补文件名里缺失的字段；"prefer" 以探测值为准，
-// 探测不到的字段保留原值（来源、版本这类信息不在容器元数据里）。
+// 以探测值为准；探测不到的字段保留原值（来源、版本这类信息不在容器元数据里）。
 func MergeProbedTags(p ParsedMedia, probed map[string]string, mode string) ParsedMedia {
 	if len(probed) == 0 {
 		return p
@@ -127,9 +126,6 @@ func MergeProbedTags(p ParsedMedia, probed map[string]string, mode string) Parse
 		}
 		v := strings.TrimSpace(value)
 		if v == "" {
-			continue
-		}
-		if mode == "fill" && !mediaTagEmpty(m, key) {
 			continue
 		}
 		m[key] = v
