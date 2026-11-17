@@ -54,7 +54,9 @@ func BucketKey(r Request) string {
 
 	var base string
 	if strings.EqualFold(strings.TrimSpace(r.MediaKind), "movie") {
-		base = fmt.Sprintf("movie|%d|%s|%d|%s", r.AccountID, strings.TrimSpace(r.Title), r.Year, ext)
+		// 电影没有「同季同规格」的前提：同一部作品可能存在 4K/1080p 等多个版本，
+		// 文件名未声明画质时它们会落进同一个桶并互相覆盖结果，因此按文件独立分桶。
+		base = fmt.Sprintf("movie|%d|%s|%d|%s|%s", r.AccountID, strings.TrimSpace(r.Title), r.Year, ext, strings.TrimSpace(r.FileID))
 	} else {
 		base = fmt.Sprintf("tv|%d|%s|%d|%s", r.AccountID, r.DirID, r.Season, ext)
 	}

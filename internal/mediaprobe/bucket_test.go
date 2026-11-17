@@ -85,3 +85,14 @@ func TestIsSampleName(t *testing.T) {
 		}
 	}
 }
+
+func TestBucketKeyMoviePerFile(t *testing.T) {
+	a := Request{MediaKind: "movie", FileID: "f1", Title: "阿凡达", Year: 2009, Ext: ".mkv"}
+	b := Request{MediaKind: "movie", FileID: "f2", Title: "阿凡达", Year: 2009, Ext: ".mkv"}
+	if BucketKey(a) == BucketKey(b) {
+		t.Fatal("同一部电影的不同文件不应共用探测结果，否则一个失败换另一个会覆盖规格")
+	}
+	if BucketKey(a) != BucketKey(Request{MediaKind: "movie", FileID: "f1", Title: "阿凡达", Year: 2009, Ext: ".mkv"}) {
+		t.Fatal("同一文件重复请求应命中同一桶")
+	}
+}
