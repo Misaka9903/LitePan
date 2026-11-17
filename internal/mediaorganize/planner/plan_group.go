@@ -21,6 +21,14 @@ func (p *Planner) planGroupWithMatch(
 ) error {
 	isTV := key.mediaKind == "tv"
 	groupUID := groupUIDOf(key)
+
+	// 探测前置：每季先探一次，失败换文件重试一次；两次都失败则整部剧不动。
+	if !p.precheckProbeGroup(key, items) {
+		for _, entry := range items {
+			p.skip(entry.item, "媒体信息探测失败，整部剧保持原样")
+		}
+		return nil
+	}
 	title := strings.TrimSpace(key.title)
 	year := key.yearPtr()
 	season := key.seasonPtr()

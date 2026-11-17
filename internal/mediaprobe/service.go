@@ -201,8 +201,8 @@ func (s *Service) ProbeBucketed(ctx context.Context, req Request) (map[string]st
 
 	info, err := s.probe(ctx, req.AccountID, req.FileID, req.Size)
 	if err != nil {
-		s.log.Debug("媒体信息探测失败，回退文件名标签", "file", req.FileName, "error", err)
-		s.store(key, req, nil)
+		// 不写失败缓存：调用方可以换同季另一个文件重试一次。
+		s.log.Debug("媒体信息探测失败，等待换文件重试", "file", req.FileName, "error", err)
 		return nil, false
 	}
 	tags := info.Tags()

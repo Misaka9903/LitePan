@@ -120,3 +120,74 @@ func (p *Planner) mediaTagsComplete(parsed rules.ParsedMedia) bool {
 	}
 	return true
 }
+
+// probeRetryLimit 每个桶最多尝试的文件数：首次 + 换一个文件重试一次。
+const probeRetryLimit = 2
+
+// precheckProbeGroup 在规划前按「季 + 扩展名」各探一次，失败时换同季另一个文件重试一次。
+// 任一桶两次都失败则返回 false，调用方应整组跳过，不做任何重命名或移动。
+func (p *Planner) precheckProbeGroup(key groupKey, items []batchEntry) bool {
+	if p.prober == nil || p.probeMode == "off" {
+		return true
+	}
+	ctx := p.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	type bucket struct {
+		season int
+		ext    string
+	}
+	order := make([]bucket, 0, 2)
+	byBucket := make(map[bucket][]batchEntry, 2)
+	for _, entry := range items {
+		if entry.item.IsDir || mediaprobe.IsSampleName(entry.item.Name) {
+			continue
+		}
+		bk := bucket{ext: strings.ToLower(path.Ext(entry.item.Name))}
+		if entry.fileParsed.Season != nil {
+			bk.season = *entry.fileParsed.Season
+		}
+		if _, ok := byBucket[bk]; !ok {
+			order = append(order, bk)
+		}
+		byBucket[bk] = append(byBucket[bk], entry)
+	}
+
+	for _, bk := range order {
+		candidates := byBucket[bk]
+		ok := false
+		for i, cand := range candidates {
+			if i >= probeRetryLimit {
+				break
+			}
+			req := mediaprobe.Request{
+				AccountID:  p.accountID,
+				FileID:     cand.item.ID,
+				FileName:   cand.item.Name,
+				Size:       cand.item.Size,
+				MediaKind:  key.mediaKind,
+				DirID:      cand.sourceDirID,
+				Title:      key.title,
+				Year:       key.year,
+				Season:     bk.season,
+				Ext:        bk.ext,
+				Special:    cand.specialLabel,
+				HintScreen: cand.fileParsed.ScreenSize,
+				HintVideo:  cand.fileParsed.VideoCodec,
+			}
+			tags, good := p.prober.ProbeBucketed(ctx, req)
+			if good && len(tags) > 0 {
+				ok = true
+				break
+			}
+			p.probeLog("[探测] 第 %d 次失败，换文件重试: %s", i+1, cand.item.Name)
+		}
+		if !ok {
+			p.probeLog("[探测] 第 %d 季两次探测均失败，整部剧保持原样: %s", bk.season, key.title)
+			return false
+		}
+	}
+	return true
+}
