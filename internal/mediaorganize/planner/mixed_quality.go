@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-
-	"litepan/internal/mediaorganize/rules"
 )
 
 // applyMixedQualityGuard 规划前检查：同一部剧某一季里文件名声明的画质不一致时，
@@ -40,9 +38,14 @@ func (p *Planner) applyMixedQualityGuard(groups map[groupKey][]batchEntry) {
 }
 
 // mixedQualityShows 返回「某季画质声明不一致」的剧 → 说明文字（不含剧名）。
-// 只统计文件名里写了画质的文件；整季都没写画质的，视为无法判断，不拦截。
+// 分辨率与编码分别判定：任一项出现两种及以上取值才算混装。
+// 只统计文件名里写了的项；某项整季都没写，视为无法判断，不拦截。
 func (p *Planner) mixedQualityShows(groups map[groupKey][]batchEntry) map[string]string {
-	perShow := map[string]map[int]map[string]int{}
+	type seasonQuality struct {
+		screens map[string]int
+		codecs  map[string]int
+	}
+	perShow := map[string]map[int]*seasonQuality{}
 
 	for key, items := range groups {
 		if key.mediaKind != "tv" {
@@ -52,8 +55,9 @@ func (p *Planner) mixedQualityShows(groups map[groupKey][]batchEntry) map[string
 			if entry.specialLabel != "" {
 				continue
 			}
-			sig := qualitySignature(entry.fileParsed)
-			if sig == "" {
+			screen := strings.ToLower(strings.TrimSpace(entry.fileParsed.ScreenSize))
+			codec := strings.ToLower(strings.TrimSpace(entry.fileParsed.VideoCodec))
+			if screen == "" && codec == "" {
 				continue
 			}
 			season := -1
@@ -61,20 +65,27 @@ func (p *Planner) mixedQualityShows(groups map[groupKey][]batchEntry) map[string
 				season = *entry.fileParsed.Season
 			}
 			if perShow[key.title] == nil {
-				perShow[key.title] = map[int]map[string]int{}
+				perShow[key.title] = map[int]*seasonQuality{}
 			}
-			if perShow[key.title][season] == nil {
-				perShow[key.title][season] = map[string]int{}
+			q := perShow[key.title][season]
+			if q == nil {
+				q = &seasonQuality{screens: map[string]int{}, codecs: map[string]int{}}
+				perShow[key.title][season] = q
 			}
-			perShow[key.title][season][sig]++
+			if screen != "" {
+				q.screens[screen]++
+			}
+			if codec != "" {
+				q.codecs[codec]++
+			}
 		}
 	}
 
 	out := make(map[string]string, len(perShow))
 	for title, seasons := range perShow {
 		bad := make([]int, 0, len(seasons))
-		for season, counts := range seasons {
-			if len(counts) >= 2 {
+		for season, q := range seasons {
+			if len(q.screens) >= 2 || len(q.codecs) >= 2 {
 				bad = append(bad, season)
 			}
 		}
@@ -88,23 +99,19 @@ func (p *Planner) mixedQualityShows(groups map[groupKey][]batchEntry) map[string
 				parts = append(parts, fmt.Sprintf("等 %d 季存在多种画质", len(bad)))
 				break
 			}
-			parts = append(parts, fmt.Sprintf("%s存在多种画质（%s）", seasonLabel(season), formatQualityCounts(seasons[season])))
+			q := seasons[season]
+			detail := make([]string, 0, 2)
+			if len(q.screens) >= 2 {
+				detail = append(detail, "分辨率 "+formatQualityCounts(q.screens))
+			}
+			if len(q.codecs) >= 2 {
+				detail = append(detail, "编码 "+formatQualityCounts(q.codecs))
+			}
+			parts = append(parts, fmt.Sprintf("%s存在多种画质（%s）", seasonLabel(season), strings.Join(detail, "；")))
 		}
 		out[title] = strings.Join(parts, "；")
 	}
 	return out
-}
-
-// qualitySignature 取文件名里声明的画质标识（分辨率 + 编码），与探测分桶的 hint 口径一致。
-func qualitySignature(parsed rules.ParsedMedia) string {
-	parts := make([]string, 0, 2)
-	if s := strings.TrimSpace(parsed.ScreenSize); s != "" {
-		parts = append(parts, strings.ToLower(s))
-	}
-	if v := strings.TrimSpace(parsed.VideoCodec); v != "" {
-		parts = append(parts, strings.ToLower(v))
-	}
-	return strings.Join(parts, "/")
 }
 
 // formatQualityCounts 输出形如 "2160p/h.265×11 / 1080p/h.264×1"，按数量降序、同数量按画质升序。
