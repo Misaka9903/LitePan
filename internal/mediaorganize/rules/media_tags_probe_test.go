@@ -7,7 +7,7 @@ func TestMergeProbedTagsPrefer(t *testing.T) {
 	got := MergeProbedTags(base, map[string]string{
 		"screen_size": "1080p",
 		"video_codec": "H.265",
-	}, "prefer")
+	})
 
 	if got.ScreenSize != "1080p" || got.VideoCodec != "H.265" {
 		t.Fatalf("prefer 模式应以探测值为准，得到 %q / %q", got.ScreenSize, got.VideoCodec)
@@ -20,7 +20,7 @@ func TestMergeProbedTagsPrefer(t *testing.T) {
 
 func TestMergeProbedTagsIgnoresUnknownAndEmpty(t *testing.T) {
 	base := ParsedMedia{Title: "Movie", ScreenSize: "1080p"}
-	got := MergeProbedTags(base, map[string]string{"title": "Other", "screen_size": "  "}, "prefer")
+	got := MergeProbedTags(base, map[string]string{"title": "Other", "screen_size": "  "})
 	if got.Title != "Movie" || got.ScreenSize != "1080p" {
 		t.Fatalf("未知键与空值都不应生效，得到 %+v", got)
 	}

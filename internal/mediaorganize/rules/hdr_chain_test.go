@@ -33,7 +33,7 @@ func TestMergeProbedTagsKeepsHDRAndBitDepth(t *testing.T) {
 		"bit_depth":   "10-bit",
 		"video_codec": "H.265",
 	}
-	got := MergeProbedTags(ParsedMedia{Title: "钢铁森林"}, probed, "prefer")
+	got := MergeProbedTags(ParsedMedia{Title: "钢铁森林"}, probed)
 	if got.HDR != "DoVi" || got.BitDepth != "10-bit" {
 		t.Fatalf("探测值未写入结构体: HDR=%q BitDepth=%q", got.HDR, got.BitDepth)
 	}

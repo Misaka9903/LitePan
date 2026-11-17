@@ -71,9 +71,9 @@ func probeEntry() batchEntry {
 	return batchEntry{item: domain.FileItem{ID: "f1", Name: "Some.Show.S01E01.mkv", Size: 1024}}
 }
 
-func TestApplyMediaProbeProbesWhenFillAndIncomplete(t *testing.T) {
+func TestApplyMediaProbeProbesWhenIncomplete(t *testing.T) {
 	prober := &countingProber{tags: map[string]string{"screen_size": "2160p"}}
-	p := &Planner{prober: prober, probeMode: "fill", mediaTagOrder: fullTagOrder()}
+	p := &Planner{prober: prober, probeMode: "prefer", mediaTagOrder: fullTagOrder()}
 
 	incomplete := completeParsed()
 	incomplete.ScreenSize = ""
@@ -134,7 +134,7 @@ func TestProbeLogOnlyOncePerBucket(t *testing.T) {
 	var lines []string
 	prober := &countingProber{tags: map[string]string{"screen_size": "2160p"}}
 	p := &Planner{
-		prober: prober, probeMode: "fill", mediaTagOrder: fullTagOrder(),
+		prober: prober, probeMode: "prefer", mediaTagOrder: fullTagOrder(),
 		log: func(msg string) { lines = append(lines, msg) },
 	}
 	incomplete := completeParsed()

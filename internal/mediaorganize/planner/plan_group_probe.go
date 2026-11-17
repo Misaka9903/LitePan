@@ -57,7 +57,7 @@ func (p *Planner) applyMediaProbe(parsed rules.ParsedMedia, key groupKey, entry 
 	if p.firstProbeLog(bucket) {
 		p.probeLog("[探测] %s → %s（%.1fs）", entry.item.Name, joinProbedTags(tags, p.mediaTagOrder), elapsed.Seconds())
 	}
-	return rules.MergeProbedTags(parsed, tags, p.probeMode)
+	return rules.MergeProbedTags(parsed, tags)
 }
 
 // firstProbeLog 让同一个桶在一次计划里只记一条日志，避免整季刷屏。

@@ -115,7 +115,7 @@ var mediaTagProbeKeys = map[string]struct{}{
 
 // MergeProbedTags 把探测到的标签合并进文件名解析结果。
 // 以探测值为准；探测不到的字段保留原值（来源、版本这类信息不在容器元数据里）。
-func MergeProbedTags(p ParsedMedia, probed map[string]string, mode string) ParsedMedia {
+func MergeProbedTags(p ParsedMedia, probed map[string]string) ParsedMedia {
 	if len(probed) == 0 {
 		return p
 	}
