@@ -349,6 +349,12 @@ func (s *Service) countRead(token string, n int64) bool {
 	return true
 }
 
+// shouldIdleOut 判断是否该因空闲中断：撞过读取上限的不算——
+// 那种「没数据」是我们自己切断造成的，归到 timeout 会误导排查方向。
+func shouldIdleOut(idle time.Duration, capped bool) bool {
+	return !capped && idle >= probeIdleTimeout
+}
+
 // idleFor 返回某个临时入口距离上次收到数据过了多久；没有令牌时返回 0。
 func (s *Service) idleFor(token string) time.Duration {
 	s.mu.Lock()
@@ -483,7 +489,8 @@ func (s *Service) probe(ctx context.Context, accountID int64, fileID string, siz
 			case <-runCtx.Done():
 				return
 			case <-ticker.C:
-				if s.idleFor(token) >= probeIdleTimeout {
+				_, capped := s.sourceStats(token)
+				if shouldIdleOut(s.idleFor(token), capped) {
 					idleHit.Store(true)
 					cancel()
 					return
