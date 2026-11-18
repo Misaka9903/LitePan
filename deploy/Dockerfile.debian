@@ -18,6 +18,9 @@ WORKDIR /app
 RUN mkdir -p /app/data /app/strm /app/mounts \
     && chown -R 1000:1000 /app/data /app/strm /app/mounts
 
+# FUSE 以非 root 运行且需要 allow_other
+RUN echo "user_allow_other" > /etc/fuse.conf
+
 COPY litepan /app/litepan
 # 静态 ffmpeg（7.0.2，单文件 77MB），放在不会被数据卷遮蔽的位置
 COPY ffmpeg /opt/ffmpeg/ffmpeg
