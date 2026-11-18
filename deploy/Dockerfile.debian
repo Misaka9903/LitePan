@@ -18,6 +18,10 @@ WORKDIR /app
 RUN mkdir -p /app/data /app/strm /app/mounts \
     && chown -R 1000:1000 /app/data /app/strm /app/mounts
 
+# fusermount3 要能反查 uid 1000 的用户名，否则报 "could not determine username"
+RUN printf 'litepan:x:1000:1000::/app:/sbin/nologin\n' >> /etc/passwd \
+    && printf 'litepan:x:1000:\n' >> /etc/group
+
 # FUSE 以非 root 运行且需要 allow_other
 RUN echo "user_allow_other" > /etc/fuse.conf
 
