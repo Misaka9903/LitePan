@@ -592,7 +592,7 @@ func (f *Failure) Label() string {
 	case ReasonCanceled:
 		return "任务已停止"
 	case ReasonProbeFailed:
-		return "探测失败（原因未知）"
+		return "原因未知"
 	default:
 		return "原因未知"
 	}
