@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -17,6 +18,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -31,8 +33,12 @@ const (
 	// 但并非所有 mkv 都把 Tracks 放在开头：实测某 BDRip 需要读到 98MB 才拿到轨信息
 	// （Cues 在文件尾部，SeekHead 又指不准），64MB 会在半路切断，所以默认给 192MB。
 	probeMaxRead = 192 << 20
-	// probeTimeout 单次探测超时；限速严重时宁可跳过也不要拖住整理任务。
-	probeTimeout = 20 * time.Second
+	// probeTotalTimeout 是单次探测的总时间上限，只做兜底。
+	// 真正的判死准则是 probeIdleTimeout：网速慢但数据仍在流动时不打断，
+	// 否则宽带给力与否会直接决定探测成功还是失败。
+	probeTotalTimeout = 5 * time.Minute
+	// probeIdleTimeout 连续这么久读不到新数据就判定卡死（断流 / 网盘限速到 0）。
+	probeIdleTimeout = 15 * time.Second
 	// probeWindow 是 ffmpeg 的头部探测窗口，与 probeMaxRead 一起控制读取量。
 	probeWindow = "5M"
 	// tokenTTL 是临时取流入口的有效期。
@@ -62,6 +68,8 @@ type sourceToken struct {
 	expires   time.Time
 	maxRead   int64
 	read      int64
+	// lastRead 是最近一次收到数据的时刻，用于空闲检测。
+	lastRead time.Time
 	// capped 表示读取曾撞到上限，ffmpeg 的输出可能因此残缺。
 	capped bool
 	// serveErr 记录取流入口转发过程中的错误，用于区分「网盘侧取流失败」。
@@ -305,7 +313,7 @@ func (s *Service) newSource(accountID int64, fileID string, size int64) (string,
 	token := hex.EncodeToString(buf)
 	maxRead := s.readLimit(size)
 	s.mu.Lock()
-	s.tokens[token] = &sourceToken{accountID: accountID, fileID: fileID, expires: time.Now().Add(tokenTTL), maxRead: maxRead}
+	s.tokens[token] = &sourceToken{accountID: accountID, fileID: fileID, expires: time.Now().Add(tokenTTL), maxRead: maxRead, lastRead: time.Now()}
 	s.mu.Unlock()
 	return token, "http://" + s.addr + "/source/" + token, nil
 }
@@ -333,11 +341,22 @@ func (s *Service) countRead(token string, n int64) bool {
 		return false
 	}
 	cur.read += n
+	cur.lastRead = time.Now()
 	if cur.read > cur.maxRead {
 		cur.capped = true
 		return false
 	}
 	return true
+}
+
+// idleFor 返回某个临时入口距离上次收到数据过了多久；没有令牌时返回 0。
+func (s *Service) idleFor(token string) time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if t := s.tokens[token]; t != nil && !t.lastRead.IsZero() {
+		return time.Since(t.lastRead)
+	}
+	return 0
 }
 
 // sourceDetail 返回某个临时入口的读取量、上限、是否撞过上限，以及取流侧的错误。
@@ -449,8 +468,29 @@ func (s *Service) probe(ctx context.Context, accountID int64, fileID string, siz
 	defer s.dropToken(token)
 	started := time.Now()
 
-	runCtx, cancel := context.WithTimeout(ctx, probeTimeout)
+	runCtx, cancel := context.WithTimeout(ctx, probeTotalTimeout)
 	defer cancel()
+
+	// 空闲监控：连续 probeIdleTimeout 收不到数据才判定卡死，网速慢但仍在流动时不打断。
+	var idleHit atomic.Bool
+	watchDone := make(chan struct{})
+	go func() {
+		defer close(watchDone)
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-runCtx.Done():
+				return
+			case <-ticker.C:
+				if s.idleFor(token) >= probeIdleTimeout {
+					idleHit.Store(true)
+					cancel()
+					return
+				}
+			}
+		}
+	}()
 
 	// 只读文件头：不指定输出，解析完流信息即退出，不会转码也不会下载整片。
 	// stderr 必须留着（-v error）：区分「文件结构损坏」和「网盘取流失败」全靠它，
@@ -478,8 +518,12 @@ func (s *Service) probe(ctx context.Context, accountID int64, fileID string, siz
 	}
 
 	// 取消之前取一遍运行状态与读取统计，失败时一并写进日志。
-	timedOut := runCtx.Err() == context.DeadlineExceeded
-	canceled := runCtx.Err() == context.Canceled
+	ctxErr := runCtx.Err()
+	idleTimeout := idleHit.Load()
+	idleSpan := s.idleFor(token)
+	cancel()
+	<-watchDone
+
 	read, limit, capped, serveErr := s.sourceDetail(token)
 	rc := exitCode(runErr)
 	detail := summarizeStderr(stderr.String())
@@ -487,14 +531,29 @@ func (s *Service) probe(ctx context.Context, accountID int64, fileID string, siz
 		// ffprobe 自己没说话时，把取流侧的错误当证据（例如 "Stream ends prematurely"）。
 		detail = summarizeStderr(serveErr)
 	}
+	if idleTimeout {
+		head := fmt.Sprintf("%.0f 秒没有新数据（已读 %.1f MB）", idleSpan.Seconds(), float64(read)/(1<<20))
+		if detail == "" {
+			detail = head
+		} else {
+			detail = head + "；" + detail
+		}
+	}
+
+	totalTimeout := ctxErr == context.DeadlineExceeded
+	userCanceled := ctxErr == context.Canceled && !idleTimeout
 
 	fail := func() (Info, *Failure) {
 		reason := ""
-		if canceled {
+		switch {
+		case userCanceled:
 			// 用户停止任务时 ffprobe 被杀，不能记成「文件有问题」。
 			reason = ReasonCanceled
-		} else {
-			reason = classifyFailure(detail, rc, timedOut, capped, serveErr, read, limit)
+		case idleTimeout:
+			// 数据不流动是网盘侧问题，不能归到文件结构。
+			reason = ReasonTimeout
+		default:
+			reason = classifyFailure(detail, rc, totalTimeout, capped, serveErr, read, limit)
 		}
 		f := &Failure{Reason: reason, Detail: detail, Read: read, Limit: limit, Capped: capped, RC: rc}
 		s.log.Info("媒体信息探测失败",
