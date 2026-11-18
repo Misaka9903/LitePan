@@ -12,6 +12,12 @@ type MediaProber interface {
 	ProbeBucketed(ctx context.Context, req mediaprobe.Request) (map[string]string, bool)
 }
 
+// DetailedProber 是可选的扩展接口：失败时能给出分类原因，供日志与汇总区分责任方。
+// 实现方（internal/mediaprobe.Service）同时实现两个接口，测试替身只需实现 MediaProber。
+type DetailedProber interface {
+	ProbeBucketedWithReason(ctx context.Context, req mediaprobe.Request) (map[string]string, *mediaprobe.Failure)
+}
+
 type FileService interface {
 	List(ctx context.Context, accountID int64, parentID string, forceRefresh bool) ([]domain.FileItem, error)
 }

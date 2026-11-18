@@ -368,6 +368,20 @@ func (p *Planner) skipInGroup(item domain.FileItem, reason, group string) {
 	p.skippedItems = append(p.skippedItems, entry)
 }
 
+// skipInGroupWithCode 同 skipInGroup，额外记录机器可读的跳过原因码，供汇总分桶统计。
+func (p *Planner) skipInGroupWithCode(item domain.FileItem, reason, code, group string) {
+	entry := map[string]any{
+		"file_id":     item.ID,
+		"file_name":   item.Name,
+		"reason":      reason,
+		"reason_code": code,
+	}
+	if group != "" {
+		entry["group"] = group
+	}
+	p.skippedItems = append(p.skippedItems, entry)
+}
+
 func (p *Planner) isMedia(item domain.FileItem) bool {
 	if item.IsDir || !strings.Contains(item.Name, ".") {
 		return false

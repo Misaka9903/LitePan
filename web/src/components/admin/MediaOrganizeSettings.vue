@@ -98,6 +98,7 @@ const {
   media_tag_order: "",
   align_media_tags: false,
   probe_enabled: false,
+  probe_max_read_mb: 192,
   skip_mixed_ext: true,
   skip_mixed_quality: true,
   max_works_per_run: 50,
@@ -501,7 +502,7 @@ defineExpose(
               <span>媒体信息提取命名</span>
               <SettingsHelpTooltip title="媒体信息提取命名说明">
                 <p>读取文件头补全分辨率、动态范围、色深、帧率、编码与音轨，文件名不再是唯一来源。</p>
-                <p>只读文件头（单次上限 64MB，普通文件通常读 1&#8211;3MB 就结束），不下载整片。</p>
+                <p>只读文件头，不下载整片，单次读取量受下面「读取上限」约束，普通文件通常读 1&#8211;3MB 就结束。</p>
                 <p>剧集：每季探测一次，失败时换同季另一个文件重试一次；两次都失败则整部保持原样。</p>
                 <p>电影：每个文件各探一次，不重试；任一文件失败则整部保持原样。以上两种情况都不改名、不移动。</p>
                 <p>关闭后完全按文件名生成，不产生任何读取。</p>
@@ -510,6 +511,23 @@ defineExpose(
           </template>
           <template #control>
             <SettingsBoolSegment v-model="settings.probe_enabled" label="媒体信息提取命名" />
+          </template>
+        </SettingsRow>
+
+        <SettingsRow :show-changed-badge="true" :changed="isFieldChanged('probe_max_read_mb')">
+          <template #info>
+            <div class="settings-row__label">
+              <span>媒体信息提取读取上限</span>
+              <SettingsHelpTooltip title="读取上限说明">
+                <p>单次探测最多从网盘读取的数据量，单位 MB。</p>
+                <p>多数片源 1&#8211;3MB 就解析完；但有些 mkv 把轨道信息放得靠后、索引在文件尾部，
+                  实测有 BDRip 需要读到 98MB，上限太小会被判为「读取超限未解析」而整部跳过。</p>
+                <p>调大能覆盖这类片源，代价是异常文件每次多读相应数据；调小可省流量。</p>
+              </SettingsHelpTooltip>
+            </div>
+          </template>
+          <template #control>
+            <AppInput v-model="settings.probe_max_read_mb" type="number" min="16" max="1024" placeholder="192" />
           </template>
         </SettingsRow>
 

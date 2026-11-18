@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,6 +21,7 @@ import (
 	"litepan/internal/mediaorganize/planner"
 	"litepan/internal/mediaorganize/rules"
 	"litepan/internal/mediaorganize/tmdb"
+	"litepan/internal/mediaprobe"
 	"litepan/internal/settings"
 )
 
@@ -908,6 +910,8 @@ func summarizePlan(plan *Plan, aborted bool) map[string]any {
 	}
 	probeSkipped := 0
 	probeWorks := map[string]struct{}{}
+	probeReasonFiles := map[string]int{}
+	probeReasonWorks := map[string]map[string]struct{}{}
 	for _, item := range plan.Skipped {
 		id := stringFromAny(item["file_id"])
 		if id != "" && seen[id] {
@@ -924,23 +928,41 @@ func summarizePlan(plan *Plan, aborted bool) map[string]any {
 		}
 		if strings.HasPrefix(reason, "媒体信息探测失败") {
 			probeSkipped++
-			if g := stringFromAny(item["group"]); g != "" {
-				probeWorks[g] = struct{}{}
+			code := stringFromAny(item["reason_code"])
+			if code == "" {
+				code = "unknown"
+			}
+			probeReasonFiles[code]++
+			group := stringFromAny(item["group"])
+			if group != "" {
+				probeWorks[group] = struct{}{}
+				if probeReasonWorks[code] == nil {
+					probeReasonWorks[code] = map[string]struct{}{}
+				}
+				probeReasonWorks[code][group] = struct{}{}
 			}
 		}
 	}
+	probeReasonCounts := map[string]any{}
+	for code, files := range probeReasonFiles {
+		probeReasonCounts[code] = map[string]any{
+			"files": files,
+			"works": len(probeReasonWorks[code]),
+		}
+	}
 	return map[string]any{
-		"total":               total,
-		"renamed":             renamed,
-		"moved":               moved,
-		"skipped":             skipped,
-		"normal_skipped":      normalSkipped,
-		"abnormal_skipped":    skipped - normalSkipped,
-		"probe_skipped":       probeSkipped,
-		"probe_skipped_works": len(probeWorks),
-		"failed":              failed,
-		"pending":             pending,
-		"stopped":             aborted,
+		"total":                   total,
+		"renamed":                 renamed,
+		"moved":                   moved,
+		"skipped":                 skipped,
+		"normal_skipped":          normalSkipped,
+		"abnormal_skipped":        skipped - normalSkipped,
+		"probe_skipped":           probeSkipped,
+		"probe_skipped_works":     len(probeWorks),
+		"probe_skipped_by_reason": probeReasonCounts,
+		"failed":                  failed,
+		"pending":                 pending,
+		"stopped":                 aborted,
 	}
 }
 
@@ -959,6 +981,9 @@ func formatSummaryZh(summary map[string]any) string {
 		} else {
 			probeNote = fmt.Sprintf("，其中探测失败 %d 个文件", probe)
 		}
+		if detail := probeReasonDetail(summary["probe_skipped_by_reason"]); detail != "" {
+			probeNote += "：" + detail
+		}
 	}
 	line := fmt.Sprintf(
 		"共 %d 项，成功 %d（重命名 %d / 移动 %d），跳过 %d（无需处理 %d / 需关注 %d%s），失败 %d，未执行 %d",
@@ -969,6 +994,52 @@ func formatSummaryZh(summary map[string]any) string {
 		line += "（已中止）"
 	}
 	return line
+}
+
+// probeReasonDetail 把按原因分桶的探测失败渲染成「文件结构异常 16 个文件 / 1 部作品」。
+func probeReasonDetail(raw any) string {
+	counts, ok := raw.(map[string]any)
+	if !ok || len(counts) == 0 {
+		return ""
+	}
+	type part struct {
+		label string
+		files int
+		works int
+	}
+	parts := make([]part, 0, len(counts))
+	for code, v := range counts {
+		m, ok := v.(map[string]any)
+		if !ok {
+			continue
+		}
+		files, _ := m["files"].(int)
+		works, _ := m["works"].(int)
+		label := mediaprobe.ReasonLabel(code)
+		if label == "" {
+			label = "原因未知"
+		}
+		parts = append(parts, part{label: label, files: files, works: works})
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	// 文件数多的排前面，数量相同按标签排序，保证日志稳定可比对。
+	sort.Slice(parts, func(i, j int) bool {
+		if parts[i].files != parts[j].files {
+			return parts[i].files > parts[j].files
+		}
+		return parts[i].label < parts[j].label
+	})
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p.works > 0 {
+			out = append(out, fmt.Sprintf("%s %d 个文件 / %d 部作品", p.label, p.files, p.works))
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s %d 个文件", p.label, p.files))
+	}
+	return strings.Join(out, "、")
 }
 
 func isNormalSkip(errText, reason string) bool {

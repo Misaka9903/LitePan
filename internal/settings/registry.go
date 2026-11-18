@@ -83,6 +83,7 @@ const (
 	KeyMOMediaTagOrder         = "mo_media_tag_order"
 	KeyMOAlignMediaTags        = "mo_align_media_tags"
 	KeyMOProbeEnabled          = "mo_probe_enabled"
+	KeyMOProbeMaxReadMB        = "mo_probe_max_read_mb"
 	KeyMOSkipMixedExt          = "mo_skip_mixed_ext"
 	KeyMOSkipMixedQuality      = "mo_skip_mixed_quality"
 	KeyMOMaxWorksPerRun        = "mo_max_works_per_run"
@@ -247,6 +248,7 @@ func defaultSpecs() []Spec {
 		boolSpec(KeyMOSkipMixedQuality, "media_organize", "画质不一致时跳过整部剧", "同一季里文件名声明的分辨率/编码不一致（如 2160p 与 1080p）时，整部剧不做任何操作。特典不参与判定。", "true"),
 		boolSpec(KeyMOSkipMixedExt, "media_organize", "扩展名不一致时跳过整部剧", "同一季混用多种媒体扩展名（如 mkv + mp4）时，整部剧不做任何操作，并在预览里说明原因。特典按文件名识别，不参与判定。", "true"),
 		boolSpec(KeyMOProbeEnabled, "media_organize", "媒体信息提取命名", "读取文件头补全分辨率、动态范围、色深、帧率、编码与音轨，不再只依赖文件名。剧集每季探一次、失败换文件重试一次；电影逐文件探测；失败则整部不动。默认关闭。", "false"),
+		intSpec(KeyMOProbeMaxReadMB, "media_organize", "媒体信息提取读取上限", "单次探测最多从网盘读取的数据量（MB）。普通文件 1–3MB 就结束，只有轨道信息靠后、索引在文件尾的片源才会读得多（实测某些 BDRip 需要 98MB）。调小可省流量，但这类片源会判定为「读取超限未解析」而整部跳过。", "192", "MB", 16, 1024),
 		intSpec(KeyMOMaxWorksPerRun, "media_organize", "每次最多整理作品数", "单次执行最多处理的作品数，0 表示不限制。", "50", "", 0, 10000),
 		boolSpec(KeyMOOverwriteExisting, "media_organize", "同名冲突时覆盖", "目标位置已有同名文件时覆盖，默认跳过。", "false"),
 		{

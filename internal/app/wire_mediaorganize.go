@@ -33,6 +33,10 @@ func wireMediaOrganize(
 		DataDir:  dataDir,
 		Playback: playbackSvc,
 		Log:      logs.For(logx.ModuleSystem),
+		// 每次探测现读设置，改完设置不用重启。
+		MaxReadMB: func() int64 {
+			return int64(st.settings.Int(settings.KeyMOProbeMaxReadMB))
+		},
 	}); err != nil {
 		logs.For(logx.ModuleSystem).Info("媒体信息探测未启用", "error", err)
 	} else {

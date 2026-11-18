@@ -27,6 +27,11 @@ export interface MediaOrganizeTask {
   is_running?: boolean;
 }
 
+export interface MediaOrganizeProbeReasonCount {
+  files?: number;
+  works?: number;
+}
+
 export interface MediaOrganizeRunResult {
   total?: number;
   renamed?: number;
@@ -34,6 +39,9 @@ export interface MediaOrganizeRunResult {
   skipped?: number;
   normal_skipped?: number;
   abnormal_skipped?: number;
+  probe_skipped?: number;
+  probe_skipped_works?: number;
+  probe_skipped_by_reason?: Record<string, MediaOrganizeProbeReasonCount>;
   failed?: number;
   pending?: number;
   stopped?: boolean;
@@ -109,6 +117,7 @@ export interface MediaOrganizeSettings {
   media_tag_order: string[] | string;
   align_media_tags: boolean;
   probe_enabled: boolean;
+  probe_max_read_mb: number;
   skip_mixed_ext: boolean;
   skip_mixed_quality: boolean;
   max_works_per_run: number;

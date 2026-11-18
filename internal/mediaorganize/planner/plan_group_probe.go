@@ -44,13 +44,17 @@ func (p *Planner) applyMediaProbe(parsed rules.ParsedMedia, key groupKey, entry 
 	bucket := mediaprobe.BucketKey(req)
 
 	started := time.Now()
-	tags, ok := p.prober.ProbeBucketed(ctx, req)
+	tags, failure := p.probeBucket(ctx, req)
 	elapsed := time.Since(started)
 
-	if !ok || len(tags) == 0 {
+	if failure != nil || len(tags) == 0 {
 		// 失败要留痕：fill 模式会静默回退文件名，用户否则完全无感。
 		if p.firstProbeLog(bucket) {
-			p.probeLog("[探测] 未取到媒体信息，回退文件名: %s", entry.item.Name)
+			if failure != nil {
+				p.probeLog("[探测] 未取到媒体信息（%s），回退文件名: %s", failure.Label(), entry.item.Name)
+			} else {
+				p.probeLog("[探测] 未取到媒体信息，回退文件名: %s", entry.item.Name)
+			}
 		}
 		return parsed
 	}
@@ -117,10 +121,11 @@ func (p *Planner) mediaTagsComplete(parsed rules.ParsedMedia) bool {
 const probeRetryLimit = 2
 
 // precheckProbeGroup 在规划前按「季 + 扩展名」各探一次，失败时换同季另一个文件重试一次。
-// 任一桶两次都失败则返回 false，调用方应整组跳过，不做任何重命名或移动。
-func (p *Planner) precheckProbeGroup(key groupKey, items []batchEntry) bool {
+// 任一桶两次都失败则返回该次失败的原因，调用方应整组跳过，不做任何重命名或移动。
+// 返回 nil 表示通过（或本机不具备探测能力，按未启用处理）。
+func (p *Planner) precheckProbeGroup(key groupKey, items []batchEntry) *mediaprobe.Failure {
 	if p.prober == nil || p.probeMode == "off" {
-		return true
+		return nil
 	}
 	ctx := p.ctx
 	if ctx == nil {
@@ -155,6 +160,7 @@ func (p *Planner) precheckProbeGroup(key groupKey, items []batchEntry) bool {
 
 	for _, bk := range order {
 		candidates := byBucket[bk]
+		var last *mediaprobe.Failure
 		ok := false
 		for i, cand := range candidates {
 			if i >= probeRetryLimit {
@@ -175,17 +181,45 @@ func (p *Planner) precheckProbeGroup(key groupKey, items []batchEntry) bool {
 				HintScreen: cand.fileParsed.ScreenSize,
 				HintVideo:  cand.fileParsed.VideoCodec,
 			}
-			tags, good := p.prober.ProbeBucketed(ctx, req)
-			if good && len(tags) > 0 {
+			tags, failure := p.probeBucket(ctx, req)
+			if failure != nil && failure.Reason == mediaprobe.ReasonProbeUnavailable {
+				// 本机没有 ffprobe 属于环境问题，不该把整部剧判成「文件有问题」。
+				p.probeLog("[探测] 本机不可探测（%s），按未启用处理: %s", failure.Label(), cand.item.Name)
+				return nil
+			}
+			if len(tags) > 0 {
 				ok = true
 				break
 			}
-			p.probeLog("[探测] 第 %d 次失败，换文件重试: %s", i+1, cand.item.Name)
+			last = failure
+			if failure != nil {
+				p.probeLog("[探测] 第 %d 次失败（%s），换文件重试: %s", i+1, failure.Label(), cand.item.Name)
+			} else {
+				p.probeLog("[探测] 第 %d 次失败，换文件重试: %s", i+1, cand.item.Name)
+			}
 		}
 		if !ok {
-			p.probeLog("[探测] 第 %d 季两次探测均失败，整部剧保持原样: %s", bk.season, key.title)
-			return false
+			failure := last
+			if failure == nil {
+				// 缓存命中「成功但无标签」时没有分类原因，仍要告知调用方整组跳过。
+				failure = &mediaprobe.Failure{Reason: mediaprobe.ReasonProbeFailed, Detail: "未返回媒体信息"}
+			}
+			p.probeLog("[探测] 第 %d 季两次探测均失败（%s），整部剧保持原样: %s", bk.season, failure.Label(), key.title)
+			return failure
 		}
 	}
-	return true
+	return nil
+}
+
+// probeBucket 优先走带原因的扩展接口；测试替身只实现基础接口时自动回退。
+func (p *Planner) probeBucket(ctx context.Context, req mediaprobe.Request) (map[string]string, *mediaprobe.Failure) {
+	if detailed, ok := p.prober.(DetailedProber); ok {
+		return detailed.ProbeBucketedWithReason(ctx, req)
+	}
+	tags, _ := p.prober.ProbeBucketed(ctx, req)
+	if len(tags) == 0 {
+		// 旧实现只报告「失败」，无法分类，但仍要让调用方知道该整组跳过。
+		return nil, &mediaprobe.Failure{Reason: mediaprobe.ReasonProbeFailed, Detail: "探测实现未提供失败原因"}
+	}
+	return tags, nil
 }

@@ -408,6 +408,36 @@ function organizeStatusVariant(task: MediaOrganizeTask): AdminRunStatusVariant {
   return "pending";
 }
 
+// 探测失败原因码 → 中文，与后端 mediaprobe.ReasonLabel 保持一致。
+const PROBE_REASON_LABELS: Record<string, string> = {
+  container_invalid: "文件结构异常",
+  source_error: "网盘取流失败",
+  timeout: "探测超时",
+  read_capped: "读取超限未解析",
+  no_streams: "未解析到媒体流",
+  crashed: "探测器异常退出",
+  probe_unavailable: "本机缺少 ffprobe",
+  canceled: "任务已停止",
+  probe_failed: "原因未知",
+};
+
+function formatProbeReasons(counts?: Record<string, { files?: number; works?: number }>): string {
+  if (!counts) return "";
+  const items = Object.entries(counts)
+    .map(([code, value]) => ({
+      label: PROBE_REASON_LABELS[code] || "原因未知",
+      files: Number(value?.files || 0),
+      works: Number(value?.works || 0),
+    }))
+    .filter((item) => item.files > 0)
+    .sort((a, b) => b.files - a.files || a.label.localeCompare(b.label, "zh-CN"));
+  return items
+    .map((item) =>
+      item.works > 0 ? `${item.label} ${item.files} 个文件 / ${item.works} 部作品` : `${item.label} ${item.files} 个文件`,
+    )
+    .join("、");
+}
+
 function statusText(task: MediaOrganizeTask): string {
   if (task.status === "stopping") return "停止中";
   if (task.status === "planning") return "生成计划中";
@@ -430,9 +460,11 @@ function statusTitle(task: MediaOrganizeTask): string {
   }
   const probeSkipped = Number(result.probe_skipped || 0);
   const probeWorks = Number(result.probe_skipped_works || 0);
-  const probeNote = probeSkipped > 0
+  const probeDetail = formatProbeReasons(result.probe_skipped_by_reason);
+  let probeNote = probeSkipped > 0
     ? (probeWorks > 0 ? `，其中探测失败 ${probeSkipped} 个文件 / ${probeWorks} 部作品` : `，其中探测失败 ${probeSkipped} 个文件`)
     : "";
+  if (probeNote && probeDetail) probeNote += `：${probeDetail}`;
   return `总数 ${result.total || 0}，改名 ${result.renamed || 0}，移动 ${result.moved || 0}，跳过 ${result.skipped || 0}（无需处理 ${result.normal_skipped || 0} / 需关注 ${result.abnormal_skipped || 0}${probeNote}），失败 ${result.failed || 0}，未执行 ${result.pending || 0}`;
 }
 

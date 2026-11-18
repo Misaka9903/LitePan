@@ -35,9 +35,13 @@ func (p *Planner) planGroupWithMatch(
 	}
 
 	// 探测前置：每季先探一次，失败换文件重试一次；两次都失败则整部剧不动。
-	if !p.precheckProbeGroup(key, items) {
+	if failure := p.precheckProbeGroup(key, items); failure != nil {
+		reason := "媒体信息探测失败，整部剧保持原样"
+		if label := failure.Label(); label != "" {
+			reason = "媒体信息探测失败（" + label + "），整部剧保持原样"
+		}
 		for _, entry := range items {
-			p.skipInGroup(entry.item, "媒体信息探测失败，整部剧保持原样", key.title)
+			p.skipInGroupWithCode(entry.item, reason, failure.Reason, key.title)
 		}
 		return nil
 	}

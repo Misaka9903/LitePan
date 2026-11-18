@@ -12,22 +12,25 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"litepan/internal/playback"
 )
 
 const (
-	// probeMaxRead 是单次探测允许从网盘读取的上限，不是每次都会读这么多：
-	// ffmpeg 解析完容器头就退出，普通文件 1-3MB 即结束。
+	// probeMaxRead 是单次探测读取上限的默认值，实际以设置 mo_probe_max_read_mb 为准。
+	// 它不是「每次都会读这么多」：ffmpeg 解析完容器头就退出，普通文件 1-3MB 即结束。
 	// 上限只是安全闸——既防异常驱动整片拉流，也要够容纳「多字幕轨 + 内嵌字体」的头部
-	// （实测某番 MKV 已用到 7.9MB）。大文件（几十 GB 的 remux）头部并不会等比变大，
-	// 留 64MB 的余量足够，正常片源不会因此多读。
-	probeMaxRead = 64 << 20
+	// （实测某番 MKV 已用到 7.9MB）。大文件（几十 GB 的 remux）头部并不会等比变大。
+	// 但并非所有 mkv 都把 Tracks 放在开头：实测某 BDRip 需要读到 98MB 才拿到轨信息
+	// （Cues 在文件尾部，SeekHead 又指不准），64MB 会在半路切断，所以默认给 192MB。
+	probeMaxRead = 192 << 20
 	// probeTimeout 单次探测超时；限速严重时宁可跳过也不要拖住整理任务。
 	probeTimeout = 20 * time.Second
 	// probeWindow 是 ffmpeg 的头部探测窗口，与 probeMaxRead 一起控制读取量。
@@ -48,6 +51,9 @@ type Options struct {
 	DataDir  string
 	Playback *playback.Service
 	Log      *slog.Logger
+	// MaxReadMB 返回单次探测允许读取的上限（MB）；为空或返回非正数时用 probeMaxRead。
+	// 做成回调是为了让设置页改动立即生效，不用重启服务。
+	MaxReadMB func() int64
 }
 
 type sourceToken struct {
@@ -58,6 +64,8 @@ type sourceToken struct {
 	read      int64
 	// capped 表示读取曾撞到上限，ffmpeg 的输出可能因此残缺。
 	capped bool
+	// serveErr 记录取流入口转发过程中的错误，用于区分「网盘侧取流失败」。
+	serveErr string
 }
 
 // cacheSchemaVersion 变更标签字段集合时递增，旧缓存自动失效。
@@ -173,45 +181,58 @@ func (s *Service) Close() error {
 // ProbeBucketed 返回一个桶的探测标签；已探测过的桶直接命中缓存。
 // ok=false 表示本次无法提供探测结果，调用方应回退文件名标签。
 func (s *Service) ProbeBucketed(ctx context.Context, req Request) (map[string]string, bool) {
-	if s == nil || s.binary == "" {
-		return nil, false
+	tags, _ := s.ProbeBucketedWithReason(ctx, req)
+	return tags, len(tags) > 0
+}
+
+// ProbeBucketedWithReason 与 ProbeBucketed 相同，失败时额外给出分类原因，
+// 便于在整理日志里区分「文件本身有问题」和「网盘取流失败」。
+func (s *Service) ProbeBucketedWithReason(ctx context.Context, req Request) (map[string]string, *Failure) {
+	if s == nil {
+		return nil, &Failure{Reason: ReasonProbeUnavailable, Detail: "探测服务未启用"}
+	}
+	if s.binary == "" {
+		return nil, &Failure{Reason: ReasonProbeUnavailable, Detail: "未找到 ffprobe 或 ffmpeg"}
 	}
 	if IsSampleName(req.FileName) {
-		return nil, false
+		return nil, nil
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	key := BucketKey(req)
 	if tags, done := s.cached(key, req); done {
-		return tags, len(tags) > 0
+		return tags, nil
 	}
 
 	select {
 	case s.sem <- struct{}{}:
 	case <-ctx.Done():
-		return nil, false
+		if ctx.Err() == context.Canceled {
+			return nil, &Failure{Reason: ReasonCanceled, Detail: "任务已停止"}
+		}
+		return nil, &Failure{Reason: ReasonTimeout, Detail: "等待探测槽位超时"}
 	}
 	defer func() { <-s.sem }()
 
 	// 并发下同一桶可能排队两次，进入临界区后再查一次。
 	if tags, done := s.cached(key, req); done {
-		return tags, len(tags) > 0
+		return tags, nil
 	}
 
-	info, err := s.probe(ctx, req.AccountID, req.FileID, req.Size)
-	if err != nil {
+	info, failure := s.probe(ctx, req.AccountID, req.FileID, req.Size)
+	if failure != nil {
 		// 不写失败缓存：调用方可以换同季另一个文件重试一次。
-		s.log.Debug("媒体信息探测失败，等待换文件重试", "file", req.FileName, "error", err)
-		return nil, false
+		s.log.Debug("媒体信息探测失败，等待换文件重试", "file", req.FileName, "reason", failure.Reason)
+		return nil, failure
 	}
 	tags := info.Tags()
 	if len(tags) == 0 {
 		s.store(key, req, nil)
-		return nil, false
+		return nil, nil
 	}
 	s.store(key, req, tags)
-	return tags, true
+	return tags, nil
 }
 
 // cached 返回缓存结果。done=true 表示该桶已探测过（成功或失败），不必再试。
@@ -282,14 +303,25 @@ func (s *Service) newSource(accountID int64, fileID string, size int64) (string,
 		return "", "", err
 	}
 	token := hex.EncodeToString(buf)
-	maxRead := int64(probeMaxRead)
-	if size > 0 && size < maxRead {
-		maxRead = size
-	}
+	maxRead := s.readLimit(size)
 	s.mu.Lock()
 	s.tokens[token] = &sourceToken{accountID: accountID, fileID: fileID, expires: time.Now().Add(tokenTTL), maxRead: maxRead}
 	s.mu.Unlock()
 	return token, "http://" + s.addr + "/source/" + token, nil
+}
+
+// readLimit 返回本次探测允许读取的字节上限：设置项优先，文件更小则按文件大小。
+func (s *Service) readLimit(size int64) int64 {
+	limit := int64(probeMaxRead)
+	if s.opts.MaxReadMB != nil {
+		if mb := s.opts.MaxReadMB(); mb > 0 {
+			limit = mb << 20
+		}
+	}
+	if size > 0 && size < limit {
+		limit = size
+	}
+	return limit
 }
 
 // countRead 累加读取字节并判断是否越过上限；越界时打标，供调用方判断结果是否可信。
@@ -308,14 +340,20 @@ func (s *Service) countRead(token string, n int64) bool {
 	return true
 }
 
-// sourceStats 返回某个临时入口已读取的字节数以及是否撞过上限。
-func (s *Service) sourceStats(token string) (int64, bool) {
+// sourceDetail 返回某个临时入口的读取量、上限、是否撞过上限，以及取流侧的错误。
+func (s *Service) sourceDetail(token string) (read, limit int64, capped bool, serveErr string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if t := s.tokens[token]; t != nil {
-		return t.read, t.capped
+		return t.read, t.maxRead, t.capped, t.serveErr
 	}
-	return 0, false
+	return 0, 0, false, ""
+}
+
+// sourceStats 返回某个临时入口已读取的字节数以及是否撞过上限。
+func (s *Service) sourceStats(token string) (int64, bool) {
+	read, _, capped, _ := s.sourceDetail(token)
+	return read, capped
 }
 
 func (s *Service) dropToken(token string) {
@@ -347,6 +385,12 @@ func (s *Service) serveSource(w http.ResponseWriter, r *http.Request) {
 		SkipRangeLimit: true,
 	})
 	if err != nil {
+		// 失败原因要跟着令牌回传给 probe，否则只能看到「未取到信息」。
+		s.mu.Lock()
+		if cur := s.tokens[token]; cur != nil {
+			cur.serveErr = err.Error()
+		}
+		s.mu.Unlock()
 		s.log.Debug("媒体信息探测取流失败", "error", err)
 	}
 }
@@ -394,13 +438,13 @@ func (b *cappedBuffer) String() string { return string(b.data) }
 
 func (b *cappedBuffer) Bytes() []byte { return b.data }
 
-func (s *Service) probe(ctx context.Context, accountID int64, fileID string, size int64) (Info, error) {
+func (s *Service) probe(ctx context.Context, accountID int64, fileID string, size int64) (Info, *Failure) {
 	if s.binary == "" {
-		return Info{}, errors.New("未找到 ffmpeg")
+		return Info{}, &Failure{Reason: ReasonProbeUnavailable, Detail: "未找到 ffprobe 或 ffmpeg"}
 	}
 	token, url, err := s.newSource(accountID, fileID, size)
 	if err != nil {
-		return Info{}, err
+		return Info{}, &Failure{Reason: ReasonSourceError, Detail: "取流入口创建失败: " + err.Error()}
 	}
 	defer s.dropToken(token)
 	started := time.Now()
@@ -409,11 +453,13 @@ func (s *Service) probe(ctx context.Context, accountID int64, fileID string, siz
 	defer cancel()
 
 	// 只读文件头：不指定输出，解析完流信息即退出，不会转码也不会下载整片。
+	// stderr 必须留着（-v error）：区分「文件结构损坏」和「网盘取流失败」全靠它，
+	// 用 -v quiet 会让分类器永远只剩「读满上限」一条证据。
 	var stdout, stderr cappedBuffer
 	var runErr error
 	if s.useJSON {
 		cmd := exec.CommandContext(runCtx, s.binary,
-			"-v", "quiet", "-print_format", "json", "-show_streams", "-show_format",
+			"-v", "error", "-print_format", "json", "-show_streams", "-show_format",
 			"-probesize", probeWindow, "-analyzeduration", "5000000",
 			url,
 		)
@@ -431,34 +477,224 @@ func (s *Service) probe(ctx context.Context, accountID int64, fileID string, siz
 		runErr = cmd.Run()
 	}
 
-	read, capped := s.sourceStats(token)
+	// 取消之前取一遍运行状态与读取统计，失败时一并写进日志。
+	timedOut := runCtx.Err() == context.DeadlineExceeded
+	canceled := runCtx.Err() == context.Canceled
+	read, limit, capped, serveErr := s.sourceDetail(token)
+	rc := exitCode(runErr)
+	detail := summarizeStderr(stderr.String())
+	if detail == "" && serveErr != "" {
+		// ffprobe 自己没说话时，把取流侧的错误当证据（例如 "Stream ends prematurely"）。
+		detail = summarizeStderr(serveErr)
+	}
+
+	fail := func() (Info, *Failure) {
+		reason := ""
+		if canceled {
+			// 用户停止任务时 ffprobe 被杀，不能记成「文件有问题」。
+			reason = ReasonCanceled
+		} else {
+			reason = classifyFailure(detail, rc, timedOut, capped, serveErr, read, limit)
+		}
+		f := &Failure{Reason: reason, Detail: detail, Read: read, Limit: limit, Capped: capped, RC: rc}
+		s.log.Info("媒体信息探测失败",
+			"file_id", fileID,
+			"reason", f.Reason,
+			"read_bytes", f.Read,
+			"limit_bytes", f.Limit,
+			"capped", f.Capped,
+			"rc", f.RC,
+			"elapsed", time.Since(started).String(),
+			"stderr", f.Detail,
+		)
+		return Info{}, f
+	}
+
 	var info Info
 	if s.useJSON {
 		parsed, err := ParseJSON(stdout.Bytes())
 		if err != nil {
-			s.log.Info("ffprobe 输出解析失败", "file_id", fileID, "error", err.Error(), "run_error", errString(runErr))
-			return Info{}, errors.New("ffprobe 输出无法解析")
+			return fail()
 		}
 		info = parsed
 	} else {
 		info = ParseOutput(stderr.String())
 	}
 	if info.Empty() {
-		s.log.Info("媒体信息探测未取到信息", "file_id", fileID, "read_bytes", read, "elapsed", time.Since(started).String())
-		return Info{}, errors.New("ffprobe/ffmpeg 未返回可用媒体信息")
+		return fail()
 	}
 	s.log.Info("媒体信息探测完成", "file_id", fileID, "read_bytes", read, "elapsed", time.Since(started).String())
 	if capped {
 		// 撞上限说明 ffmpeg 是被硬切断的，流信息可能只解析到一半。
 		s.log.Warn("探测读取达到上限被中断，结果可能不完整",
-			"file_id", fileID, "read_bytes", read, "limit_bytes", int64(probeMaxRead))
+			"file_id", fileID, "read_bytes", read, "limit_bytes", limit)
 	}
 	return info, nil
 }
 
-func errString(err error) string {
-	if err == nil {
+// 探测失败的原因分类：让日志能区分「文件本身有问题」和「网盘侧取流失败」。
+const (
+	ReasonProbeUnavailable = "probe_unavailable"
+	ReasonSourceError      = "source_error"
+	ReasonTimeout          = "timeout"
+	ReasonContainerInvalid = "container_invalid"
+	ReasonReadCapped       = "read_capped"
+	ReasonNoStreams        = "no_streams"
+	ReasonCrashed          = "crashed"
+	// ReasonCanceled 表示任务被用户停止或上层取消，不是文件/网盘的问题。
+	ReasonCanceled = "canceled"
+	// ReasonProbeFailed 用于探测器只报告「失败」、不给分类的旧实现。
+	ReasonProbeFailed = "probe_failed"
+)
+
+// Failure 描述一次探测失败，并带上判断归属所需的证据。
+type Failure struct {
+	Reason string
+	Detail string
+	Read   int64
+	Limit  int64
+	Capped bool
+	RC     int
+}
+
+func (f *Failure) Error() string {
+	if f == nil {
 		return ""
 	}
-	return err.Error()
+	return "媒体信息探测失败(" + f.Reason + ")"
+}
+
+// ReasonLabel 返回原因码对应的中文说明，供整理汇总直接使用。
+func ReasonLabel(reason string) string {
+	return (&Failure{Reason: reason}).Label()
+}
+
+// Label 返回给人看的原因说明，用于整理的跳过原因与汇总文案。
+func (f *Failure) Label() string {
+	if f == nil {
+		return ""
+	}
+	switch f.Reason {
+	case ReasonContainerInvalid:
+		return "文件结构异常"
+	case ReasonSourceError:
+		return "网盘取流失败"
+	case ReasonTimeout:
+		return "探测超时"
+	case ReasonReadCapped:
+		return "读取超限未解析"
+	case ReasonNoStreams:
+		return "未解析到媒体流"
+	case ReasonCrashed:
+		return "探测器异常退出"
+	case ReasonProbeUnavailable:
+		return "本机缺少 ffprobe"
+	case ReasonCanceled:
+		return "任务已停止"
+	case ReasonProbeFailed:
+		return "探测失败（原因未知）"
+	default:
+		return "原因未知"
+	}
+}
+
+var (
+	// containerBrokenHints 是 ffprobe 判定容器结构损坏时的措辞。
+	// 只有数据完整（未撞读取上限）时命中才算指向文件本身：截断的数据流同样会报这些错。
+	containerBrokenHints = []string{
+		"duplicate element",
+		"exceeds containing master element",
+		"invalid data found when processing input",
+		"moov atom not found",
+		"malformed",
+		"invalid nal",
+		"could not find codec parameters",
+	}
+	// sourceFailedHints 是取流半路失败时的措辞，仅在读取量未撞上限时才成立。
+	sourceFailedHints = []string{
+		"server returned",
+		"connection reset",
+		"connection refused",
+		"connection timed out",
+		"input/output error",
+		"end of file",
+		"file ended prematurely",
+		"403",
+		"404",
+		"502",
+		"503",
+	}
+	memAddrRe = regexp.MustCompile(`\s*@\s*0x[0-9a-fA-F]+`)
+	urlRe     = regexp.MustCompile(`https?://\S+`)
+)
+
+// classifyFailure 按「直接证据优先」的顺序给失败定性：
+// 结构错误优先于读满上限，读满上限优先于「没解析到流」，取流错误只在没读满时成立。
+// classifyFailure 按「直接证据优先」的顺序给失败定性。
+// 关键约束：容器结构错误的措辞只有在数据完整（没撞读取上限）时才可采信——
+// 读取被上限切断时，ffprobe 也会报 "Duplicate element"/"element exceeds"，
+// 那是截断产生的副产品，据此判定文件损坏会重演误判。
+func classifyFailure(detail string, rc int, timedOut, capped bool, serveErr string, read, limit int64) string {
+	lower := strings.ToLower(detail)
+	notCapped := limit <= 0 || read < limit
+	if notCapped && containsAnyHint(lower, containerBrokenHints) {
+		return ReasonContainerInvalid
+	}
+	if timedOut {
+		return ReasonTimeout
+	}
+	if rc < 0 {
+		return ReasonCrashed
+	}
+	if serveErr != "" && notCapped {
+		return ReasonSourceError
+	}
+	if notCapped && containsAnyHint(lower, sourceFailedHints) {
+		return ReasonSourceError
+	}
+	if capped {
+		return ReasonReadCapped
+	}
+	if strings.TrimSpace(serveErr) != "" {
+		return ReasonSourceError
+	}
+	return ReasonNoStreams
+}
+
+func containsAnyHint(text string, hints []string) bool {
+	for _, h := range hints {
+		if strings.Contains(text, h) {
+			return true
+		}
+	}
+	return false
+}
+
+// summarizeStderr 把 ffprobe 的 stderr 压成一行短摘要：去掉内存地址与链接，截断后写日志。
+func summarizeStderr(text string) string {
+	s := memAddrRe.ReplaceAllString(text, "")
+	s = urlRe.ReplaceAllString(s, "<url>")
+	s = strings.Join(strings.Fields(s), " ")
+	// 按字符截断：字节截断会把中文/emoji 切成半个，日志里出现乱码。
+	const maxDetail = 200
+	if utf8.RuneCountInString(s) > maxDetail {
+		runes := []rune(s)
+		s = string(runes[:maxDetail]) + "…"
+	}
+	return s
+}
+
+// exitCode 把 ffprobe 的退出状态压成整数：正常退出为 0，被信号终止为 -1。
+func exitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		if code := exitErr.ExitCode(); code >= 0 {
+			return code
+		}
+		return -1
+	}
+	return -1
 }

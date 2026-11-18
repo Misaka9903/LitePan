@@ -27,6 +27,7 @@ var moSettingFieldToKey = map[string]string{
 	"media_tag_order":          settings.KeyMOMediaTagOrder,
 	"align_media_tags":         settings.KeyMOAlignMediaTags,
 	"probe_enabled":            settings.KeyMOProbeEnabled,
+	"probe_max_read_mb":        settings.KeyMOProbeMaxReadMB,
 	"skip_mixed_ext":           settings.KeyMOSkipMixedExt,
 	"skip_mixed_quality":       settings.KeyMOSkipMixedQuality,
 	"max_works_per_run":        settings.KeyMOMaxWorksPerRun,
@@ -47,7 +48,7 @@ func SettingsDict(svc *settings.Service) map[string]any {
 		switch field {
 		case "proxy_enabled", "align_media_tags", "overwrite_existing", "probe_enabled", "skip_mixed_ext", "skip_mixed_quality":
 			out[field] = svc.Bool(key)
-		case "api_request_interval_ms", "tmdb_request_interval_ms", "max_works_per_run":
+		case "api_request_interval_ms", "tmdb_request_interval_ms", "max_works_per_run", "probe_max_read_mb":
 			out[field] = svc.Int(key)
 		default:
 			out[field] = svc.String(key)
@@ -81,6 +82,12 @@ func UpdateSettings(ctx context.Context, svc *settings.Service, updates map[stri
 		}
 		if (field == "tmdb_api_key" || field == "proxy_password") && strings.TrimSpace(val) == "" {
 			continue
+		}
+		if field == "probe_max_read_mb" {
+			n, err := strconv.Atoi(strings.TrimSpace(val))
+			if err != nil || n < 16 || n > 1024 {
+				return domain.Errorf(domain.CodeValidation, "媒体信息提取读取上限需在 16–1024 MB 之间")
+			}
 		}
 		normalized[key] = val
 	}
@@ -149,7 +156,7 @@ func anyToSettingString(field string, raw any) (string, error) {
 			return "", fmt.Errorf("%s 需为布尔值", field)
 		}
 		return strconv.FormatBool(b), nil
-	case "api_request_interval_ms", "tmdb_request_interval_ms", "max_works_per_run":
+	case "api_request_interval_ms", "tmdb_request_interval_ms", "max_works_per_run", "probe_max_read_mb":
 		switch n := raw.(type) {
 		case float64:
 			return strconv.Itoa(int(n)), nil
