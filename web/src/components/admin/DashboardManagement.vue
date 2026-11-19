@@ -6,6 +6,7 @@ import {
   type CacheRetentionTask,
 } from "@/api/cacheRetention";
 import { getApiErrorMessage } from "@/api/client";
+import { useNetworkInfo } from "@/composables/usePlatform";
 import { fetchDashboardOverview, type DashboardOverview } from "@/api/dashboard";
 import type { FuseMount } from "@/api/fuse";
 import type { LogStats } from "@/api/logs";
@@ -23,6 +24,8 @@ import { toast } from "@/composables/useToast";
 import { formatRelativeTimeAgo, formatSize } from "@/utils/format";
 import "@/styles/admin-shared.css";
 import SvgIcon from "@/components/icons/SvgIcon.vue";
+
+const { isWindows } = useNetworkInfo();
 
 const OVERVIEW_TAB = "overview";
 const LOGS_TAB = "logs";
@@ -452,7 +455,7 @@ onMounted(() => {
           </div>
 
           <div class="ov-rows">
-            <div class="ov-row ov-row--fuse">
+            <div v-if="!isWindows" class="ov-row ov-row--fuse">
               <span class="ov-row__ico"><SvgIcon name="plug" :size="15" /></span>
               <div class="ov-row__main">
                 <span class="ov-row__name">FUSE 挂载点</span>

@@ -10,7 +10,8 @@ import {
   type SettingCategory,
   type SettingItem,
 } from "@/api/settings";
-import { toast } from "@/composables/useToast";
+import { copyTextToClipboard, toast } from "@/composables/useToast";
+import { useNetworkInfo } from "@/composables/usePlatform";
 import { useSettingsLoad } from "@/composables/useSettingsLoad";
 import { useAdminPageLoading } from "@/composables/useAdminLoadingBar";
 import { useSectionTabRoute } from "@/composables/useSectionTabRoute";
@@ -25,6 +26,7 @@ import SettingsSegment from "@/components/admin/SettingsSegment.vue";
 import SettingsBoolSegment from "@/components/admin/SettingsBoolSegment.vue";
 import SectionTabBar from "@/components/admin/SectionTabBar.vue";
 import SettingsCard from "@/components/admin/SettingsCard.vue";
+import InputActionField from "@/components/admin/InputActionField.vue";
 import SettingsRow from "@/components/admin/SettingsRow.vue";
 import SettingsHelpTooltip from "@/components/admin/SettingsHelpTooltip.vue";
 import ApiKeySettings from "@/components/admin/ApiKeySettings.vue";
@@ -103,6 +105,23 @@ const items = ref<SettingItem[]>([]);
 const settingsLoaded = ref(false);
 const form = reactive<Record<string, string>>({});
 const original = reactive<Record<string, string>>({});
+
+// 局域网访问开启时，在开关下方直接给出可用地址，省得再去别处找。
+const lanAddressText = computed(() => {
+  if (typeof window === "undefined" || lanIps.value.length === 0) return "";
+  const p = window.location.port || (window.location.protocol === "https:" ? "443" : "80");
+  return lanIps.value.map((ip) => `http://${ip}:${p}`).join("  ");
+});
+
+async function copyLanAddress() {
+  if (!lanAddressText.value) return;
+  await copyTextToClipboard(lanAddressText.value, {
+    successMessage: "已复制局域网访问地址",
+    errorMessage: "复制失败，请手动选择地址复制",
+  });
+}
+
+const { ips: lanIps } = useNetworkInfo();
 
 const newPassword = ref("");
 const confirmPassword = ref("");
@@ -331,7 +350,9 @@ async function load() {
   }, "加载设置失败");
 }
 
-onMounted(load);
+onMounted(() => {
+  load();
+});
 
 watch(
   () => props.forcePasswordChange,
@@ -733,9 +754,8 @@ async function submit() {
           :title="group.title"
           :accent="accentColor"
         >
+          <template v-for="it in group.items" :key="it.key">
           <SettingsRow
-            v-for="it in group.items"
-            :key="it.key"
             :show-changed-badge="true"
             :changed="isChanged(it)"
           >
@@ -805,6 +825,24 @@ async function submit() {
               </div>
             </template>
           </SettingsRow>
+          <SettingsRow
+            v-if="it.key === 'desktop_lan_access' && form[it.key] === 'true' && lanAddressText"
+          >
+            <template #info>
+              <div class="settings-row__label">
+                <span>局域网访问地址</span>
+              </div>
+            </template>
+            <template #control>
+              <InputActionField>
+                <AppInput :model-value="lanAddressText" readonly />
+                <template #action>
+                  <AppButton type="button" variant="secondary" @click="copyLanAddress">复制</AppButton>
+                </template>
+              </InputActionField>
+            </template>
+          </SettingsRow>
+          </template>
         </SettingsCard>
       </template>
 
@@ -819,6 +857,16 @@ async function submit() {
 </template>
 
 <style scoped>
+/* 局域网访问打开时，在开关下方直接显示可用地址 */
+.lan-address-hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  word-break: break-all;
+}
+
 /* 卡片标题旁的说明，和刮削设置里的做法一致 */
 .two-factor-tip {
   margin: 0;

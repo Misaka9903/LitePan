@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { fetchSystemConfig, updateWebDAVConfig } from "@/api/auth";
 import AppButton from "@/components/base/AppButton.vue";
 import AppInput from "@/components/base/AppInput.vue";
@@ -12,6 +12,7 @@ import { useSettingsForm, useSettingsSave } from "@/composables/useSettingsForm"
 import { useAdminPageLoading } from "@/composables/useAdminLoadingBar";
 import { useSettingsLoad } from "@/composables/useSettingsLoad";
 import { copyTextToClipboard } from "@/composables/useToast";
+import { useNetworkInfo } from "@/composables/usePlatform";
 
 const props = withDefaults(
   defineProps<{
@@ -33,6 +34,17 @@ const webdavServerUrl = computed(() => {
   return `${window.location.origin.replace(/\/$/, "")}/dav`;
 });
 
+const { ips: lanIps, isWindows } = useNetworkInfo();
+
+// 容器里的网卡地址外部访问不到，只有桌面版才展示局域网入口。
+const lanWebdavUrls = computed(() => {
+  if (!isWindows.value || typeof window === "undefined") return [];
+  const p = window.location.port || (window.location.protocol === "https:" ? "443" : "80");
+  return lanIps.value.map((ip) => `http://${ip}:${p}/dav`);
+});
+
+
+
 function applySettings(data: { webdav_enabled?: boolean }) {
   applyBaseline({ webdav_enabled: data.webdav_enabled !== false });
 }
@@ -45,6 +57,13 @@ async function loadSettings() {
 
 async function copyWebdavUrl() {
   await copyTextToClipboard(webdavServerUrl.value, {
+    successMessage: "已复制 WebDAV 地址",
+    errorMessage: "复制失败，请手动选择地址复制",
+  });
+}
+
+async function copyUrl(url: string) {
+  await copyTextToClipboard(url, {
     successMessage: "已复制 WebDAV 地址",
     errorMessage: "复制失败，请手动选择地址复制",
   });
@@ -109,6 +128,21 @@ defineExpose({
             <AppInput :model-value="webdavServerUrl" readonly />
             <template #action>
               <AppButton type="button" variant="secondary" @click="copyWebdavUrl">复制</AppButton>
+            </template>
+          </InputActionField>
+        </template>
+      </SettingsRow>
+      <SettingsRow v-for="url in lanWebdavUrls" :key="url">
+        <template #info>
+          <div class="settings-row__label">
+            <span>局域网 WebDAV</span>
+          </div>
+        </template>
+        <template #control>
+          <InputActionField>
+            <AppInput :model-value="url" readonly />
+            <template #action>
+              <AppButton type="button" variant="secondary" @click="copyUrl(url)">复制</AppButton>
             </template>
           </InputActionField>
         </template>

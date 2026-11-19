@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { containsQuery } from "@/utils/format";
 import { computed, onMounted, reactive, ref } from "vue";
+import { usePlatformText } from "@/constants/platformText";
 import { getApiErrorMessage } from "@/api/client";
 import { localUploadApi, type LocalUploadMapping } from "@/api/cloudTools";
 import { toast } from "@/composables/useToast";
@@ -29,15 +30,17 @@ const workspaceItems = computed<ProxyWorkspaceItem[]>(() =>
   })),
 );
 
-const workspaceFields: ProxyField[] = [
+const text = usePlatformText();
+
+const workspaceFields = computed<ProxyField[]>(() => [
   {
     key: "path",
-    label: "容器内路径",
-    placeholder: "/app/data/updatefiles",
-    helpTitle: "容器内路径说明",
-    helpBody: "docker-compose 中映射到容器的路径（容器内那一侧），例如 <code>/app/data/updatefiles</code>。<br>前台从服务器上传时按左侧标签浏览，不会暴露服务器其他路径。",
+    label: text.value.uploadPathLabel,
+    placeholder: text.value.uploadPathPlaceholder,
+    helpTitle: text.value.uploadPathHelpTitle,
+    helpBody: text.value.uploadPathHelpBody,
   },
-];
+]);
 
 function matches(title: string) {
   return containsQuery(title, props.searchQuery);
@@ -118,7 +121,7 @@ async function saveMappings() {
   const name = localForm.name.trim();
   const path = localForm.path.trim();
   if (!name || !path.startsWith("/")) {
-    toast.error("请填写标签名和以 / 开头的容器内路径");
+    toast.error(text.value.uploadPathToast);
     return;
   }
   const editing = localMappings.value.find((m) => m.name === selectedName.value);
@@ -200,7 +203,7 @@ async function removeMapping() {
       title="从服务器上传 · 目录映射设置"
       caption=""
       icon="hand-folder"
-      :subtitle="selectedName ? `容器内路径 · ${localForm.path || '未填写'}` : ''"
+      :subtitle="selectedName ? (text.uploadPathLabel + ' · ' + (localForm.path || '未填写')) : ''"
       :items="workspaceItems"
       :selected-id="selectedName"
       :fields="workspaceFields"

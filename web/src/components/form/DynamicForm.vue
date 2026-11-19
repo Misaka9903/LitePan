@@ -121,7 +121,7 @@ function inputAutocomplete(f: FieldSchema): string | undefined {
           v-else-if="f.type === 'local_dir'"
           :display="fieldString(f.name)"
           :title="fieldString(f.name)"
-          placeholder="点击浏览选择容器内目录"
+          placeholder="点击浏览选择目录"
           browse-label="浏览"
           @browse="openBrowse(f.name)"
         />

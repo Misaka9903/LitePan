@@ -28,7 +28,7 @@ const props = withDefaults(
     confirmText?: string;
   }>(),
   {
-    title: "选择容器内目录",
+    title: "选择目录",
     confirmText: "选择当前目录",
   },
 );

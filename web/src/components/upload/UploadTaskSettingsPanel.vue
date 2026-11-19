@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
+import { usePlatformText } from "@/constants/platformText";
+
+
+const text = usePlatformText();
 import { getApiErrorMessage } from "@/api/client";
 import { fetchSettings, saveSettings, type SettingItem } from "@/api/settings";
 import { uploadApi } from "@/api/upload";
@@ -298,7 +302,7 @@ onMounted(() => {
               <strong>磁力下载端口</strong>
               <small
                 :class="{ 'is-error': btPortError }"
-                title="用于磁力/BT 下载连接其他节点；Docker Bridge 网络需映射同一 TCP/UDP 端口，Host 网络无需映射"
+                :title="text.btPortTooltip"
               >
                 {{ btPortError || "用于连接 BT 下载节点" }}
               </small>
@@ -322,7 +326,7 @@ onMounted(() => {
           <div class="task-settings__item task-settings__item--wide task-settings__path">
             <div class="task-settings__label">
               <strong>临时下载目录</strong>
-              <small>选择容器内目录</small>
+              <small>选择目录</small>
             </div>
             <AccountFolderField
               :display="tempDirDisplay"

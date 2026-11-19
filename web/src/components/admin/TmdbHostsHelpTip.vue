@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import AppDropdown from "@/components/base/AppDropdown.vue";
+import { usePlatform } from "@/composables/usePlatform";
 
 const open = ref(false);
+// Windows 客户端不走容器，这套 docker hosts 说明没有意义。
+const { isWindows } = usePlatform();
 </script>
 
 <template>
-  <AppDropdown v-model:open="open" trigger="click" align="left" :min-width="360">
+  <AppDropdown v-if="!isWindows" v-model:open="open" trigger="click" align="left" :min-width="360">
     <template #trigger="{ open: isOpen, toggle }">
       <button
         type="button"

@@ -43,3 +43,13 @@ export function fetchSettings(options?: { includeHidden?: boolean }) {
 export function saveSettings(values: Record<string, string>) {
   return http.put<SettingsPayload>("/admin/settings", values);
 }
+
+export interface NetworkAddresses {
+  lanAccessEnabled: boolean;
+  ips: string[];
+  platform: string;
+}
+
+export function fetchNetworkAddresses() {
+  return http.get<NetworkAddresses>("/admin/network/addresses");
+}

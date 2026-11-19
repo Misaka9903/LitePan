@@ -2,6 +2,7 @@
 import { computed, defineAsyncComponent, ref } from "vue";
 import { useRoute } from "vue-router";
 import { ApiError } from "@/api/client";
+import { useNetworkInfo } from "@/composables/usePlatform";
 import AppButton from "@/components/base/AppButton.vue";
 import BandMenuButton from "@/components/admin/band/BandMenuButton.vue";
 import SectionTabBar from "@/components/admin/SectionTabBar.vue";
@@ -17,16 +18,18 @@ const WEBDAV_TAB = "webdav";
 const FUSE_TAB = "fuse";
 const VALID_TABS = [WEBDAV_TAB, FUSE_TAB] as const;
 
-const tabs = [
-  { key: WEBDAV_TAB, label: "WebDAV" },
-  { key: FUSE_TAB, label: "本地挂载" },
-];
+// Windows 上 FUSE 不可用，直接不显示「本地挂载」页签。
+const { isWindows } = useNetworkInfo();
+const tabs = computed(() => {
+  const list = [{ key: WEBDAV_TAB, label: "WebDAV" }];
+  if (!isWindows.value) list.push({ key: FUSE_TAB, label: "本地挂载" });
+  return list;
+});
 
 const route = useRoute();
 const webdavSettingsRef = ref<InstanceType<typeof WebDAVSettings> | null>(null);
 const fuseMgmtRef = ref<InstanceType<typeof FuseManagementComponent> | null>(null);
 const savingWebdav = ref(false);
-
 const webdavDirty = computed(() => Boolean(webdavSettingsRef.value?.getDirty?.()));
 // 本地挂载页的 ☰ 挂在页面 tab 栏里（面板隐藏后才出现），状态由面板组件持有。
 const fuseBandHidden = computed(() => Boolean(fuseMgmtRef.value?.bandHidden));
@@ -73,6 +76,12 @@ const { activeTab, setActiveTab } = useSectionTabRoute(WEBDAV_TAB, VALID_TABS, {
     return confirmDiscardChanges(() => leavingDirty);
   },
 });
+
+// Windows 上如果 URL 带着 tab=fuse，切回 WebDAV
+if (isWindows.value && activeTab.value === FUSE_TAB) {
+  activeTab.value = WEBDAV_TAB;
+}
+
 
 async function saveWebdav() {
   if (!webdavDirty.value || !webdavSettingsRef.value) return;
