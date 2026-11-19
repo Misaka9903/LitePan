@@ -1,6 +1,10 @@
 package settings
 
-import "litepan/internal/domain"
+import (
+	"runtime"
+
+	"litepan/internal/domain"
+)
 
 // 全局设置：默认值在代码，DB 仅存用户改过的项。
 
@@ -17,6 +21,8 @@ const (
 	KeyBuiltinOfflineTempDir       = "builtin_offline_temp_dir"
 	KeyBuiltinOfflineMaxSpeedMB    = "builtin_offline_max_speed_mb"
 	KeyBuiltinOfflineBTPort        = "builtin_offline_bt_port"
+	KeyDesktopListenPort           = "desktop_listen_port"
+	KeyDesktopLanAccess            = "desktop_lan_access"
 	KeyWebDAVCacheEnabled          = "webdav_cache_enabled"
 	KeyFuseReadCacheEnabled        = "fuse_read_cache_enabled"
 	KeyFuseReadCacheMaxGB          = "fuse_read_cache_max_gb"
@@ -163,7 +169,14 @@ func selectSpec(key, category, label, description, def string, options []Option)
 }
 
 func defaultSpecs() []Spec {
-	return []Spec{
+	// 桌面版不像容器版那样需要处理目录映射和端口映射，Docker 相关提示只在 Linux 侧出现。
+	offlineTempDesc := "内置下载器缓存文件所在的目录；Docker 部署请先把宿主机目录映射进容器。修改后新任务立即使用。"
+	btPortDesc := "用于磁力/BT 下载连接其他节点；Docker Bridge 网络需同时映射同一 TCP/UDP 端口，Host 网络无需映射。填 0 表示随机端口，修改后立即应用。"
+	if runtime.GOOS == "windows" {
+		offlineTempDesc = "内置下载器缓存文件所在的本地目录，可填写任意可写路径。修改后新任务立即使用。"
+		btPortDesc = "用于磁力/BT 下载连接其他节点。填 0 表示随机端口，修改后立即应用。"
+	}
+	specs := []Spec{
 		boolSpec(KeyCacheEnabled, "performance", "启用元数据缓存", "关闭后所有目录列表都直连网盘，不走缓存。", "true"),
 		intSpec(KeyCacheTTL, "performance", "全局缓存时间", "缓存过期时间", "30", "分钟", 0, 1440),
 		intSpec(KeyCacheMaxItems, "performance", "缓存条目上限", "元数据缓存最多保留的条目数，超出按 LRU 淘汰。", "10000", "条", 1000, 1000000),
@@ -171,9 +184,9 @@ func defaultSpecs() []Spec {
 		boolSpec(KeyCachePersistenceEnabled, "performance", "启用缓存持久化", "定时将未过期元数据缓存写入磁盘，重启后恢复。", "true"),
 		intSpec(KeyCachePersistenceIntervalMin, "performance", "持久化快照间隔", "缓存写入磁盘的间隔，修改后立即生效。", "10", "分钟", 1, 1440),
 		intSpec(KeyUploadTaskConcurrency, "performance", "任务并发数", "上传、跨盘下载和内置下载三个队列各自使用该并发上限，队列之间不共享槽位；修改后立即生效。", "3", "个", 1, 5),
-		stringSpec(KeyBuiltinOfflineTempDir, "performance", "内置离线临时目录", "内置下载器缓存文件所在的容器内路径；Docker 请先把宿主机目录映射进容器。修改后新任务立即使用。", "data/builtin_offline"),
+		stringSpec(KeyBuiltinOfflineTempDir, "performance", "内置离线临时目录", offlineTempDesc, "data/builtin_offline"),
 		intSpec(KeyBuiltinOfflineMaxSpeedMB, "performance", "内置离线限速", "HTTP 与 Magnet 共用的全局下载限速；填 0 表示不限速。", "0", "MB/s", 0, 10240),
-		intSpec(KeyBuiltinOfflineBTPort, "performance", "磁力下载端口", "用于磁力/BT 下载连接其他节点；Docker Bridge 网络需同时映射同一 TCP/UDP 端口，Host 网络无需映射。填 0 表示随机端口，修改后立即应用。", "42069", "", 0, 65535),
+		intSpec(KeyBuiltinOfflineBTPort, "performance", "磁力下载端口", btPortDesc, "42069", "", 0, 65535),
 		boolSpec(KeyWebDAVCacheEnabled, "performance", "WebDAV 路径与 PROPFIND 缓存", "开启后缓存 WebDAV 路径解析与 PROPFIND 响应，减少客户端列目录时的网盘 API 调用。", "true"),
 		boolSpec(KeyFuseReadCacheEnabled, "performance", "FUSE 读缓存", "开启后 FUSE 读取过的文件块会写入本地磁盘，与元数据缓存无关。在「文件共享 → 本地挂载」页配置。", "false"),
 		intSpec(KeyFuseReadCacheMaxGB, "performance", "FUSE 读缓存容量上限", "磁盘块缓存最大占用，在「文件共享 → 本地挂载」页配置。", "10", "GB", 1, 500),
@@ -365,6 +378,25 @@ func defaultSpecs() []Spec {
 			Default: "vidhub",
 			Hidden:  true,
 		},
+	}
+	for _, sp := range desktopSpecs() {
+		specs = append(specs, sp)
+	}
+	return specs
+}
+
+// desktopSpecs 是桌面版专属设置：容器/裸机部署的监听地址由 --listen 决定，不放进来。
+func desktopSpecs() []Spec {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+	return []Spec{
+		intSpec(KeyDesktopListenPort, "system", "访问端口",
+			"面板与 WebDAV 共用该端口，被占用时会自动往后顺延。修改后需重启 LitePan 生效（托盘菜单 → 重启）。",
+			"5211", "", 1024, 65535),
+		boolSpec(KeyDesktopLanAccess, "system", "允许局域网访问",
+			"开启后同一局域网内的手机、电视等设备可用本机 IP 访问面板与 WebDAV。修改后需重启 LitePan 生效（托盘菜单 → 重启）。",
+			"false"),
 	}
 }
 

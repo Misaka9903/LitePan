@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"compress/gzip"
 	"embed"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"mime"
 	"net/http"
 	"path"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -262,6 +264,7 @@ func NewRouter(d Deps) http.Handler {
 				r.Post("/two-factor/disable", h.adminDisableTwoFactor)
 				r.Post("/two-factor/recovery-codes", h.adminRegenerateTwoFactorRecoveryCodes)
 				r.Post("/webdav-config", h.adminWebDAVConfig)
+				r.Get("/network/addresses", h.networkAddresses)
 				r.Get("/emby/configs", h.listEmbyConfigs)
 				r.Put("/emby/configs", h.replaceEmbyConfigs)
 				r.Post("/emby/test", h.testEmbyConfig)
@@ -566,13 +569,33 @@ func davBypass(dav http.Handler, next http.Handler) http.Handler {
 	})
 }
 
+// platformScript 让前端第一帧就知道自己跑在什么平台上，
+// 不用等 /api/admin/network/addresses 返回，避免平台相关入口闪烁。
+var platformScript = []byte(`<script>window.__PLATFORM__="` + runtime.GOOS + `";</script>`)
+
+func injectPlatformTag(raw []byte) []byte {
+	repl := make([]byte, 0, len(platformScript)+len("</head>"))
+	repl = append(repl, platformScript...)
+	repl = append(repl, "</head>"...)
+	return bytes.Replace(raw, []byte("</head>"), repl, 1)
+}
+
 func spaHandler(fsys fs.FS) http.Handler {
 	fileServer := http.FileServer(http.FS(fsys))
-	index, _ := fs.ReadFile(fsys, "index.html")
+	rawIndex, _ := fs.ReadFile(fsys, "index.html")
+	index := injectPlatformTag(rawIndex)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upath := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
 		if upath == "" {
 			upath = "index.html"
+		}
+		if upath == "index.html" {
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			if r.Method != http.MethodHead {
+				_, _ = w.Write(index)
+			}
+			return
 		}
 		if _, statErr := fs.Stat(fsys, upath); statErr == nil {
 			setStaticCacheHeader(w, upath)
@@ -583,7 +606,7 @@ func spaHandler(fsys fs.FS) http.Handler {
 			serveCompressedAsset(w, r, fsys, upath)
 			return
 		}
-		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if r.Method != http.MethodHead {
 			_, _ = w.Write(index)
@@ -633,7 +656,7 @@ func setStaticCacheHeader(w http.ResponseWriter, upath string) {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		return
 	}
-	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Cache-Control", "no-store")
 }
 
 func staticContentType(name string) string {
