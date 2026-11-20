@@ -80,6 +80,8 @@ func main() {
 	}
 	defer releaseInstance()
 
+	ensureAutoStartSilent()
+
 	// 端口和局域网访问可以在设置里改，落库后下次启动生效。
 	fillFromSettings(&opts)
 
@@ -182,7 +184,27 @@ func setAutoStart(on bool) error {
 	if err != nil {
 		return err
 	}
-	return k.SetStringValue(autoRunName, `"`+exe+`"`)
+	// 开机启动时静默驻留托盘，不主动拉起浏览器。
+	return k.SetStringValue(autoRunName, `"`+exe+`" --no-browser`)
+}
+
+// ensureAutoStartSilent 把旧版本写入的自启项补上 --no-browser，
+// 避免升级后开机仍然抢前台。
+func ensureAutoStartSilent() {
+	k, err := registry.OpenKey(registry.CURRENT_USER, autoRunKey, registry.QUERY_VALUE|registry.SET_VALUE)
+	if err != nil {
+		return
+	}
+	defer k.Close()
+	v, _, err := k.GetStringValue(autoRunName)
+	if err != nil || strings.Contains(v, "--no-browser") {
+		return
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	_ = k.SetStringValue(autoRunName, `"`+exe+`" --no-browser`)
 }
 
 // spawnRestart 拉起一个新实例。此时旧进程已经完成 shutdown，端口已释放，
