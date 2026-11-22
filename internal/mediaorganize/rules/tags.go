@@ -45,6 +45,12 @@ func normalizeFrameRate(value any) string {
 		return ""
 	}
 	if strings.HasSuffix(strings.ToLower(raw), "fps") {
+		// 4 位数字会被正则截成后 3 位（1000fps -> 000fps），这里挡掉越界值。
+		if f, err := strconv.ParseFloat(strings.TrimSuffix(strings.ToLower(raw), "fps"), 64); err == nil {
+			if f <= 0 || f >= 1000 {
+				return ""
+			}
+		}
 		return raw
 	}
 	f, err := strconv.ParseFloat(raw, 64)
@@ -52,6 +58,9 @@ func normalizeFrameRate(value any) string {
 		return raw
 	}
 	rounded := int(f + 0.5)
+	if rounded <= 0 || rounded >= 1000 {
+		return ""
+	}
 	if absFloat(f-float64(rounded)) < 0.05 {
 		return fmt.Sprintf("%dfps", rounded)
 	}
