@@ -36,19 +36,19 @@ type TMDBEpisode struct {
 
 // SeasonDiff 是一季的比对结果。
 type SeasonDiff struct {
-	Season int
+	Season int `json:"season"`
 	// Local 是本地解析出的集数，Aired 是 TMDB 已播出集数，Total 是 TMDB 该季总集数。
-	Local int
-	Aired int
-	Total int
+	Local int `json:"local"`
+	Aired int `json:"aired"`
+	Total int `json:"total"`
 	// Missing 是已播出但本地没有的集号；Extra 是本地有而 TMDB 已播出列表里没有的集号。
-	Missing []int
-	Extra   []int
+	Missing []int `json:"missing"`
+	Extra   []int `json:"extra"`
 	// Airing 表示该季尚未播完。
-	Airing bool
+	Airing bool `json:"airing"`
 	// Unknown 表示本地集号与 TMDB 对不上（疑似绝对集号/分季差异），Missing 仅供参考。
-	Unknown bool
-	Note    string
+	Unknown bool   `json:"unknown"`
+	Note    string `json:"note"`
 }
 
 // AbsoluteDiff 是「季划分不一致」时的兜底结论：两边都换算成连续集号再比。
@@ -56,9 +56,9 @@ type SeasonDiff struct {
 // 例：TMDB 把整部作品记成一季 85 集，本地按 S1/S2/S3 分开放，
 // 逐季比对必然对不上；换算成绝对集号后能说清「缺第 67–85 集」。
 type AbsoluteDiff struct {
-	Local   int
-	Aired   int
-	Missing []int
+	Local   int   `json:"local"`
+	Aired   int   `json:"aired"`
+	Missing []int `json:"missing"`
 }
 
 // Range 把缺失集号压成「67–85」这样的区间描述，供日志与前端显示。
@@ -68,16 +68,16 @@ func (a AbsoluteDiff) Range() string {
 
 // ShowDiff 是一部剧的季集比对结果。
 type ShowDiff struct {
-	Seasons []SeasonDiff
+	Seasons []SeasonDiff `json:"seasons"`
 	// MissingSeasons 是 TMDB 已播出、本地整季没有的季号。
-	MissingSeasons []int
+	MissingSeasons []int `json:"missing_seasons"`
 	// ExtraSeasons 是本地有、TMDB 没有的季号（只作提示）。
-	ExtraSeasons []int
-	LocalSeasons []int
-	LatestSeason int
-	Unreliable   bool
+	ExtraSeasons []int `json:"extra_seasons"`
+	LocalSeasons []int `json:"local_seasons"`
+	LatestSeason int   `json:"latest_season"`
+	Unreliable   bool  `json:"unreliable"`
 	// Absolute 只在季划分对不上时给出（Unreliable 为 true 时）。
-	Absolute *AbsoluteDiff
+	Absolute *AbsoluteDiff `json:"absolute,omitempty"`
 }
 
 // Bad 表示存在真正需要补的缺失（缺季或确有缺集）。
@@ -185,8 +185,12 @@ func CompareShow(local map[int][]int, tmdb []TMDBSeason, today time.Time) ShowDi
 					out.Seasons[i].Note = "季划分与 TMDB 不同，按绝对集号核对是齐的"
 				}
 				out.Unreliable = true
+				out.Absolute = abs
+			} else if out.Unreliable {
+				// 逐季结论不可靠时，绝对集号才是正式结论
+				out.Absolute = abs
 			}
-			out.Absolute = abs
+			// 逐季可靠且绝对比对同样有缺：保留逐季结果，不设置 Absolute
 		}
 	}
 	return out

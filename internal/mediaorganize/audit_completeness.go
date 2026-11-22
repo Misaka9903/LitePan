@@ -211,7 +211,8 @@ func (s *Service) applyCompleteness(ctx context.Context, rep *audit.Report, clie
 		// 电影库里的 id 往往也能撞上一个同名无关的剧，那样会把电影当成一季剧去比集号。
 		tvFirst := looksLikeTVGroup(*g)
 		if tvFirst {
-			if tv, err := f.lookup(g.TMDBID, "tv"); err == nil && tv != nil {
+			tv, terr := f.lookup(g.TMDBID, "tv")
+			if terr == nil && tv != nil {
 				g.MediaType = "tv"
 				g.Match = "matched"
 				s.fillShowDiff(f, g, tv, today, opts)
@@ -307,6 +308,17 @@ func (s *Service) fillShowDiff(f *tmdbFetcher, g *audit.Group, detail map[string
 		*base = *detailSeason
 	}
 	diff := audit.CompareShow(g.Episodes, seasons, today)
+	if s.log != nil {
+		for _, sd := range diff.Seasons {
+			if len(sd.Missing) == 0 && len(sd.Extra) == 0 && !sd.Unknown {
+				continue // 齐全的季不占日志
+			}
+			s.log.Info("片库体检：分季",
+				"group", g.Name, "season", sd.Season, "local", sd.Local,
+				"aired", sd.Aired, "missing", sd.Missing, "extra", sd.Extra,
+				"unknown", sd.Unknown, "note", sd.Note)
+		}
+	}
 	if !opts.Seasons {
 		// 只查缺集：季级差异不报。
 		diff.MissingSeasons = nil
@@ -413,6 +425,11 @@ var tvLikeNameRe = regexp.MustCompile(`(?i)s\d{1,2}[\s._-]{0,2}(?:ep|e)\s?\d{1,4
 // 只看文件名里的 SxxExx 与季目录名，不用 ParsedMedia：解析器会把
 // 《杀死比尔2》《疾速追杀2》这类片名里的序号当成集号，据此判剧会误伤电影。
 func looksLikeTVGroup(g audit.Group) bool {
+	// 已经解析出季集结构就说明是剧：文件名可能写成 01.mkv / 第01集，
+	// 不带 SxxExx，光看样例名会误判成电影。
+	if len(g.Episodes) > 0 {
+		return true
+	}
 	for _, b := range g.Buckets {
 		if tvLikeNameRe.MatchString(b.Sample) {
 			return true

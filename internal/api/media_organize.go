@@ -541,6 +541,17 @@ type mediaOrganizeAuditDTO struct {
 	CheckFranchise *bool `json:"check_franchise,omitempty"`
 }
 
+// flagText 把可选开关转成日志可读文本，nil 表示前端未指定（按开启处理）。
+func flagText(p *bool) string {
+	if p == nil {
+		return "default"
+	}
+	if *p {
+		return "on"
+	}
+	return "off"
+}
+
 func (h *Handler) runMediaOrganizeAudit(w http.ResponseWriter, r *http.Request) {
 	if !ensureServiceReady(w, h.mediaOrganize != nil) {
 		return
@@ -550,6 +561,9 @@ func (h *Handler) runMediaOrganizeAudit(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, err)
 		return
 	}
+	h.log.Info("体检请求（同步）", "account", in.AccountID, "root", in.RootID,
+		"seasons", flagText(in.CheckSeasons), "episodes", flagText(in.CheckEpisodes),
+		"info", flagText(in.CheckMediaInfo), "franchise", flagText(in.CheckFranchise))
 	report, err := h.mediaOrganize.RunAudit(r.Context(), mediaorganize.AuditRequest{
 		AccountID:      in.AccountID,
 		RootID:         in.RootID,
@@ -566,6 +580,8 @@ func (h *Handler) runMediaOrganizeAudit(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, err)
 		return
 	}
+	h.log.Info("体检完成", "groups", len(report.Groups), "bad", report.Summary.BadGroups,
+		"incomplete", report.Summary.IncompleteGroups, "missing_eps", report.Summary.MissingEpisodes)
 	writeOK(w, report)
 }
 
@@ -579,6 +595,9 @@ func (h *Handler) startMediaOrganizeAudit(w http.ResponseWriter, r *http.Request
 		writeErr(w, err)
 		return
 	}
+	h.log.Info("体检请求（后台）", "account", in.AccountID, "root", in.RootID,
+		"seasons", flagText(in.CheckSeasons), "episodes", flagText(in.CheckEpisodes),
+		"info", flagText(in.CheckMediaInfo), "franchise", flagText(in.CheckFranchise))
 	job, err := h.mediaOrganize.StartAudit(mediaorganize.AuditRequest{
 		AccountID:      in.AccountID,
 		RootID:         in.RootID,

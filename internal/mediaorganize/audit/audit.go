@@ -52,52 +52,52 @@ type Options struct {
 // Bucket 是同一目录、同一扩展名的一组同源文件，一季通常是一个桶。
 type Bucket struct {
 	// DirID 是桶所在目录的 file id，后续移动要用。
-	DirID   string
-	DirPath string
-	Ext     string
-	Sample  string
-	Files   int
-	Bytes   int64
+	DirID   string `json:"dir_id"`
+	DirPath string `json:"dir_path"`
+	Ext     string `json:"ext"`
+	Sample  string `json:"sample"`
+	Files   int    `json:"files"`
+	Bytes   int64  `json:"bytes"`
 	// Missing 该桶里有文件缺的标签键（缺一集也算，特典不参与）。
-	Missing []string
+	Missing []string `json:"missing"`
 	// Total 参与标签判定的文件数（已排除特典）。
-	Total int
+	Total int `json:"total"`
 	// MissingFiles 每个缺失项缺了多少个文件，键与 Missing 一致。
-	MissingFiles map[string]int
+	MissingFiles map[string]int `json:"missing_files"`
 	// Mixed 桶内文件签名不一致（例如混了 2160p 与 1080p）。
-	Mixed bool
+	Mixed bool `json:"mixed"`
 	// MixedExt 该目录里存在其它媒体扩展名（例如一季里混了 mkv 与 mp4）。
-	MixedExt bool
+	MixedExt bool `json:"mixed_ext"`
 }
 
 // Group 是归集单位：一部剧（Unit=show）或一季目录（Unit=season）。
 type Group struct {
 	// ID 是归集单位的目录 file id（Unit=show 时为根目录下一层的目录）。
-	ID      string
-	Name    string
-	Path    string
-	Files   int
-	Bytes   int64
-	Missing []string
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Path    string   `json:"path"`
+	Files   int      `json:"files"`
+	Bytes   int64    `json:"bytes"`
+	Missing []string `json:"missing"`
 	// MissingTotal 参与标签判定的总集数；MissingFiles 汇总各季每个缺失项缺的集数。
-	MissingTotal int
-	MissingFiles map[string]int
-	Mixed        bool
+	MissingTotal int            `json:"missing_total"`
+	MissingFiles map[string]int `json:"missing_files"`
+	Mixed        bool           `json:"mixed"`
 	// MixedExt 组内任一季度目录存在扩展名不一致。
-	MixedExt bool
-	Buckets  []Bucket
+	MixedExt bool     `json:"mixed_ext"`
+	Buckets  []Bucket `json:"seasons"`
 	// Episodes 是「季号 → 集号」，仅在 Options.CollectEpisodes 时填充。
-	Episodes map[int][]int
+	Episodes map[int][]int `json:"episodes"`
 	// UnparsedEpisodes 是媒体文件里解析不出集号的个数。
-	UnparsedEpisodes int
+	UnparsedEpisodes int `json:"unparsed_episodes"`
 
 	// 以下字段由服务层在拿到 TMDB 数据后填充（audit 包只承载结果，不发请求）。
-	TMDBID    string
-	MediaType string
+	TMDBID    string `json:"tmdb_id"`
+	MediaType string `json:"media_type"`
 	// Match 为 matched / unmatched / failed / skipped。
-	Match        string
-	Completeness *ShowDiff
-	Franchise    *CollectionDiff
+	Match        string          `json:"match"`
+	Completeness *ShowDiff       `json:"completeness"`
+	Franchise    *CollectionDiff `json:"franchise"`
 }
 
 // Complete 报告该组是否包含 TMDB 比对结论。
@@ -108,12 +108,12 @@ func (g Group) OK() bool { return len(g.Missing) == 0 && !g.MixedExt }
 
 // Report 是一次体检的结果。
 type Report struct {
-	Groups      []Group
-	TotalGroups int
-	BadGroups   int
-	TotalFiles  int
-	BadFiles    int
-	BadBytes    int64
+	Groups      []Group `json:"groups"`
+	TotalGroups int     `json:"total_groups"`
+	BadGroups   int     `json:"bad_groups"`
+	TotalFiles  int     `json:"total_files"`
+	BadFiles    int     `json:"bad_files"`
+	BadBytes    int64   `json:"bad_bytes"`
 }
 
 // Run 对整棵树做体检。root 必须是扫描的根目录。

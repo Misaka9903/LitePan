@@ -35,6 +35,8 @@ const rootName = ref("");
 const accountId = ref<number>(0);
 const scanning = ref(false);
 const jobLogs = ref<Array<{ time: string; message: string }>>([]);
+// 进行中自动展开，完成后折叠保留，方便回看。
+const logOpen = ref(false);
 /** 归集移动的逐条勾选；默认勾上「有问题的」作品 */
 const selected = ref<Record<string, boolean>>({});
 const selectedCount = computed(() => Object.values(selected.value).filter(Boolean).length);
@@ -151,10 +153,15 @@ function resetSelection() {
 async function applyReport(data: Awaited<ReturnType<typeof runMediaOrganizeAudit>>) {
   report.value = data;
   resetSelection();
-  if (data.summary.bad_groups === 0) {
+  const bad = data.summary.bad_groups ?? 0;
+  const incomplete = data.summary.incomplete_groups ?? 0;
+  if (bad === 0 && incomplete === 0) {
     toast.success(`体检完成：${data.summary.total_groups} 部全部齐全`);
+  } else if (bad > 0) {
+    const extra = incomplete > 0 ? `，另有 ${incomplete} 部缺季集` : "";
+    toast.success(`体检完成：${bad} 部信息不全${extra}`);
   } else {
-    toast.success(`体检完成：${data.summary.bad_groups} 部信息不全`);
+    toast.success(`体检完成：${incomplete} 部缺季集`);
   }
 }
 
@@ -170,6 +177,7 @@ async function startAudit() {
   }
   scanning.value = true;
   jobLogs.value = [];
+  logOpen.value = false;
   report.value = null;
   try {
     const started = await startMediaOrganizeAudit(payload.value);
@@ -603,17 +611,22 @@ onMounted(async () => {
       </span>
     </div>
 
+    <div v-if="jobLogs.length" class="audit-log-wrap">
+      <button type="button" class="audit-log__title audit-log__toggle" @click="logOpen = !logOpen">
+        {{ scanning ? "体检进行中，进度实时输出" : "本次体检日志" }} · {{ jobLogs.length }} 行
+        <span class="audit-log__chevron">{{ scanning || logOpen ? "收起" : "展开" }}</span>
+      </button>
+      <pre v-show="scanning || logOpen" ref="logBox" class="audit-log">{{ jobLogs.map((l) => `[${l.time}] ${l.message}`).join("\n") }}</pre>
+    </div>
+
     <AdminEmptyState
-      v-if="!report && !scanning"
+      v-if="!report && !scanning && !jobLogs.length"
       icon="hand-folder"
       title="还没有体检结果"
       description="选一个目录后开始体检：先查媒体信息标签是否齐全、有没有扩展名混用，再按 TMDB 查缺季、缺集与缺失的电影续集。"
     />
 
-    <div v-else-if="scanning" class="audit-log-wrap">
-      <div class="audit-log__title">体检进行中，进度会实时输出：</div>
-      <pre ref="logBox" class="audit-log">{{ jobLogs.length ? jobLogs.map((l) => `[${l.time}] ${l.message}`).join("\n") : "正在启动…" }}</pre>
-    </div>
+    <div v-else-if="scanning" class="audit-loading">体检进行中，结果会显示在下方…</div>
 
     <div v-else-if="!rows.length" class="audit-loading">没有需要处理的条目</div>
 
@@ -869,6 +882,27 @@ onMounted(async () => {
 .audit-move__result {
   font-size: 13px;
   color: var(--text-muted);
+}
+
+.audit-log__toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.audit-log__chevron {
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .audit-log-wrap {

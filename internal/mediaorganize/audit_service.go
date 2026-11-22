@@ -365,13 +365,22 @@ func (s *Service) runAuditReport(ctx context.Context, req AuditRequest, progress
 	if progress != nil {
 		progress(fmt.Sprintf("开始拉取目录树（单位：%s，按设置间隔限速）…", unit))
 	}
+	if s.log != nil {
+		s.log.Info("体检：开始拉取目录树", "root", req.RootID, "root_name", req.RootName, "unit", unit)
+	}
 	rep, dirs, err := runAudit(scanCtx, s.files, req, required, unit, auditRunOptions{
 		CollectEpisodes: checkSeasons || checkEpisodes,
 		SkipTags:        !checkMedia,
 		SkipMixedExt:    !checkMedia,
 	}, progress)
 	if err != nil {
+		if s.log != nil {
+			s.log.Error("体检：拉取目录树失败", "root", req.RootID, "err", err)
+		}
 		return nil, err
+	}
+	if s.log != nil {
+		s.log.Info("体检：目录树完成", "dirs", dirs, "files", rep.TotalFiles, "groups", rep.TotalGroups)
 	}
 	if progress != nil {
 		progress(fmt.Sprintf("目录树完成：%d 个目录 / %d 个文件 / %d 个分组", dirs, rep.TotalFiles, rep.TotalGroups))
@@ -386,7 +395,13 @@ func (s *Service) runAuditReport(ctx context.Context, req AuditRequest, progress
 		}
 		if client, cerr := s.newTMDBClient(""); cerr == nil {
 			tmdbCalls = s.applyCompleteness(ctx, &rep, client, s.tmdbInterval(), opts, time.Now(), progress)
+			if s.log != nil {
+				s.log.Info("体检：TMDB 比对结束", "groups", len(rep.Groups), "tmdb_calls", tmdbCalls)
+			}
 		} else {
+			if s.log != nil {
+				s.log.Warn("体检：TMDB 客户端不可用，跳过集数比对", "err", cerr)
+			}
 			checkSeasons, checkEpisodes, checkFranchise = false, false, false
 			req.CheckSeasons, req.CheckEpisodes, req.CheckFranchise = &checkSeasons, &checkEpisodes, &checkFranchise
 		}
@@ -440,6 +455,11 @@ func (s *Service) runAuditReport(ctx context.Context, req AuditRequest, progress
 			report.Summary.TotalGroups, report.Summary.BadGroups, report.Summary.MissingSeasons,
 			report.Summary.MissingEpisodes, report.Summary.MissingMovies, report.Summary.UnmatchedGroups,
 			report.Summary.TMDBRequests))
+	}
+	if s.log != nil {
+		s.log.Info("体检汇总", "total", report.Summary.TotalGroups, "bad", report.Summary.BadGroups,
+			"incomplete", report.Summary.IncompleteGroups, "missing_eps", report.Summary.MissingEpisodes,
+			"unmatched", report.Summary.UnmatchedGroups)
 	}
 	s.storeAudit(report)
 	return report, nil
