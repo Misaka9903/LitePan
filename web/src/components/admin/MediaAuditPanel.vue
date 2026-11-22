@@ -269,7 +269,7 @@ function unverifiedSeasons(
   group: MediaAuditGroup,
 ): { season: number; note: string; local: number; aired: number }[] {
   return (group.completeness?.seasons ?? [])
-    .filter((s) => Boolean(s.note) && s.missing.length === 0)
+    .filter((s) => s.unverified && s.missing.length === 0)
     .map((s) => ({ season: s.season, note: s.note, local: s.local, aired: s.aired }));
 }
 

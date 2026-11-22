@@ -47,8 +47,10 @@ type SeasonDiff struct {
 	// Airing 表示该季尚未播完。
 	Airing bool `json:"airing"`
 	// Unknown 表示本地集号与 TMDB 对不上（疑似绝对集号/分季差异），Missing 仅供参考。
-	Unknown bool   `json:"unknown"`
-	Note    string `json:"note"`
+	Unknown bool `json:"unknown"`
+	// Unverified 表示没拿到该季集列表，只能按总集数核对。
+	Unverified bool   `json:"unverified"`
+	Note       string `json:"note"`
 }
 
 // AbsoluteDiff 是「季划分不一致」时的兜底结论：两边都换算成连续集号再比。
@@ -390,6 +392,7 @@ func compareSeason(number int, localEps []int, s TMDBSeason, todayStr string) Se
 		// 没拉季详情：只能按集数核对，集号未知。
 		diff.Aired = total
 		diff.Unknown = true
+		diff.Unverified = true
 		diff.Note = "未取到 TMDB 集列表，只按集数核对"
 		if diff.Local < total {
 			diff.Note += "（本地更少，需人工确认）"
@@ -397,6 +400,7 @@ func compareSeason(number int, localEps []int, s TMDBSeason, todayStr string) Se
 		return diff
 	} else {
 		diff.Unknown = true
+		diff.Unverified = true
 		diff.Note = "TMDB 该季没有可用集信息"
 		return diff
 	}

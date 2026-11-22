@@ -290,6 +290,8 @@ export interface MediaAuditSeasonStatus {
   missing: number[];
   extra: number[];
   airing: boolean;
+  /** 没拿到该季集列表，只能按数量核对 */
+  unverified?: boolean;
   /** 本地集号与 TMDB 对不上（疑似绝对集号/分季差异），缺失仅供参考 */
   unknown: boolean;
   note?: string;
