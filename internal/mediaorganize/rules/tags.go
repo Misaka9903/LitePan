@@ -61,7 +61,7 @@ func normalizeFrameRate(value any) string {
 	if rounded <= 0 || rounded >= 1000 {
 		return ""
 	}
-	if absFloat(f-float64(rounded)) < 0.05 {
+	if absFloat(f-float64(rounded)) < 0.15 {
 		return fmt.Sprintf("%dfps", rounded)
 	}
 	return fmt.Sprintf("%.2ffps", f)
