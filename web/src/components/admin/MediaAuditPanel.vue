@@ -654,7 +654,7 @@ onMounted(async () => {
             <th>作品</th>
             <th class="audit-table__season-col">目录</th>
             <th>样本文件</th>
-            <th class="audit-table__missing-col">缺失</th>
+            <th class="audit-table__missing-col">标签</th>
             <th class="audit-table__complete-col">季集 / 合集</th>
             <th class="audit-table__num-col">文件</th>
             <th class="audit-table__num-col">体积</th>
@@ -682,7 +682,7 @@ onMounted(async () => {
                 :class="['audit-badge', isPartialMissing(group, key) ? 'audit-badge--warn' : '']"
                 :title="missingHint(group, key)"
               >
-                {{ labelOf(key)
+                缺 {{ labelOf(key)
                 }}<template v-if="isPartialMissing(group, key)">
                   {{ missingFiles(group, key) }}/{{ group.missing_total }}</template>
               </span>
