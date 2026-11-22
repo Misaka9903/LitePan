@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"litepan/internal/procattr"
 	"log/slog"
 	"net"
 	"net/http"
@@ -505,20 +506,20 @@ func (s *Service) probe(ctx context.Context, accountID int64, fileID string, siz
 	var stdout, stderr cappedBuffer
 	var runErr error
 	if s.useJSON {
-		cmd := exec.CommandContext(runCtx, s.binary,
+		cmd := procattr.Hide(exec.CommandContext(runCtx, s.binary,
 			"-v", "error", "-print_format", "json", "-show_streams", "-show_format",
 			"-probesize", probeWindow, "-analyzeduration", "5000000",
 			url,
-		)
+		))
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
 		runErr = cmd.Run()
 	} else {
-		cmd := exec.CommandContext(runCtx, s.binary,
+		cmd := procattr.Hide(exec.CommandContext(runCtx, s.binary,
 			"-hide_banner", "-nostdin", "-loglevel", "info",
 			"-probesize", probeWindow, "-analyzeduration", probeWindow,
 			"-i", url,
-		)
+		))
 		cmd.Stdout = io.Discard
 		cmd.Stderr = &stderr
 		runErr = cmd.Run()

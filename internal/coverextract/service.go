@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"litepan/internal/procattr"
 	"log/slog"
 	"math/big"
 	"net"
@@ -640,7 +641,7 @@ var durationPattern = regexp.MustCompile(`Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?
 func probeDuration(parent context.Context, bin, url string) (int64, error) {
 	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
-	out, _ := exec.CommandContext(ctx, bin, "-hide_banner", "-i", url).CombinedOutput()
+	out, _ := procattr.Hide(exec.CommandContext(ctx, bin, "-hide_banner", "-i", url)).CombinedOutput()
 	match := durationPattern.FindSubmatch(out)
 	if len(match) != 4 {
 		detail := strings.TrimSpace(string(out))
@@ -755,7 +756,7 @@ func runFrameCommand(ctx context.Context, bin, url string, ts int64, keyframeOnl
 		"-f", "image2pipe", "-c:v", "mjpeg", "pipe:1",
 	)
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := procattr.Hide(exec.CommandContext(ctx, bin, args...))
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -906,7 +907,7 @@ func (s *Service) downloadOne(ctx context.Context, url string, asset downloadAss
 	}
 	smokeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	out, smokeErr := exec.CommandContext(smokeCtx, tmpPath, "-version").CombinedOutput()
+	out, smokeErr := procattr.Hide(exec.CommandContext(smokeCtx, tmpPath, "-version")).CombinedOutput()
 	if smokeErr != nil || !strings.Contains(string(out), "ffmpeg version") {
 		return errors.New("FFmpeg 冒烟检查失败")
 	}
