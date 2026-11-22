@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-var qualityTokenRe = regexp.MustCompile(`(?i)(?:4320[pP]|2160[pP]|1080[pP]|720[pP]|480[pP]|4[Kk]|2[Kk]|8[Kk]|UHD|FHD|FullHD|WEB[-. ]?DL|WEB[-. ]?Rip|BluRay|BDRip|BDMV|BD25|BD50|HDTV|HDTVrip|DVDRip|DVD[-. ]?9|DVD[-. ]?5|REMUX|Repack|Proper|Extended|Director'?s[. ]Cut|Theatrical|Uncut|HDR10\+?|HDR|Dolby[. ]Vision|DoVi|DV\b|SDR|HLG|1[02][-. ]?bit|8[-. ]?bit|H\.?264|H\.?265|HEVC|AVC|x264|x265|VP9|AV1|DTS[-.]?HD[. ]?MA|DTS[-.]?HD[. ]?HRA|DTS[-.]?HD|DTS[-.:]?X|DTS|DDP|DD\+|DD|AC3|EAC3|TrueHD|Atmos|FLAC|AAC|OPUS|MP3|PCM|\d{2,3}(?:\.\d+)?fps|MultiAudio|Multi[. ]?Lang)`)
+var qualityTokenRe = regexp.MustCompile(`(?i)(?:4320[pP]|2160[pP]|1080[pP]|720[pP]|480[pP]|4[Kk]|2[Kk]|8[Kk]|UHD|FHD|FullHD|WEB[-. ]?DL|WEB[-. ]?Rip|BluRay|BDRip|BDMV|BD25|BD50|HDTV|HDTVrip|DVDRip|DVD[-. ]?9|DVD[-. ]?5|REMUX|Repack|Proper|Extended|Director'?s[. ]Cut|Theatrical|Uncut|HDR10\+?|HDR|Dolby[. ]Vision|DoVi|DV\b|SDR|HLG|1[02][-. ]?bit|8[-. ]?bit|H[-.]?264|H[-.]?265|HEVC|AVC|x264|x265|VP9|AV1|DTS[-.]?HD[. ]?MA|DTS[-.]?HD[. ]?HRA|DTS[-.]?HD|DTS[-.:]?X|DTS|DDP|DD\+|DD|AC3|EAC3|TrueHD|Atmos|FLAC|AAC|OPUS|MP3|PCM|\d{2,3}(?:\.\d+)?[-. ]?fps|MultiAudio|Multi[. ]?Lang)`)
 
 var (
 	combinedAACChannelsRe = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])AAC(\d\.\d)(?:$|[^A-Za-z0-9])`)
@@ -324,9 +324,9 @@ func classifyChannelToken(token string) string {
 
 func classifyVideoCodecToken(token string) string {
 	switch strings.ToLower(strings.TrimSpace(token)) {
-	case "h.264", "h264", "x264", "avc":
+	case "h.264", "h264", "h-264", "x264", "avc":
 		return "H.264"
-	case "h.265", "h265", "x265", "hevc":
+	case "h.265", "h265", "h-265", "x265", "hevc":
 		return "H.265"
 	case "av1":
 		return "AV1"
