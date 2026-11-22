@@ -30,6 +30,7 @@ import (
 	"litepan/internal/store"
 	"litepan/internal/strm"
 	"litepan/internal/strmdelete"
+	"litepan/internal/toolsfetch"
 	"litepan/internal/upload"
 )
 
@@ -84,6 +85,8 @@ func New(ctx context.Context, opts Options) (*App, error) {
 	if err := prepareDataDirs(cfg); err != nil {
 		return nil, err
 	}
+	// Windows 首次启动时后台补齐 ffmpeg/ffprobe；其他平台是空实现。
+	toolsfetch.Ensure(cfg.DataDir, logs.For(logx.ModuleSystem))
 	if status, restoreErr := backuprestore.ApplyPending(ctx, backuprestore.ApplyOptions{
 		DataDir: cfg.DataDir,
 		DBPath:  cfg.DBPath,
