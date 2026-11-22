@@ -264,6 +264,15 @@ function missingEpisodes(
     .map((s) => ({ season: s.season, eps: s.missing, unknown: s.unknown, local: s.local, aired: s.aired }));
 }
 
+/** 未核实季：有说明但没有确凿缺集，例如没取到 TMDB 集列表只能按数量核对 */
+function unverifiedSeasons(
+  group: MediaAuditGroup,
+): { season: number; note: string; local: number; aired: number }[] {
+  return (group.completeness?.seasons ?? [])
+    .filter((s) => Boolean(s.note) && s.missing.length === 0)
+    .map((s) => ({ season: s.season, note: s.note, local: s.local, aired: s.aired }));
+}
+
 function airingSeasons(group: MediaAuditGroup) {
   return (group.completeness?.seasons ?? []).filter((s) => s.airing);
 }
@@ -723,7 +732,13 @@ onMounted(async () => {
                   class="audit-ok"
                 >S{{ pad2(s.season) }} 在播 {{ s.aired }}/{{ s.total }}</span>
                 <span
-                  v-if="!group.completeness.missing_seasons.length && !missingEpisodes(group).length"
+                  v-for="s in unverifiedSeasons(group)"
+                  :key="`uv-${s.season}`"
+                  class="audit-badge audit-badge--warn"
+                  :title="s.note + (s.local || s.aired ? `（本地 ${s.local} 集 / TMDB ${s.aired} 集）` : '')"
+                >S{{ pad2(s.season) }} 未核实</span>
+                <span
+                  v-if="!group.completeness.missing_seasons.length && !missingEpisodes(group).length && !unverifiedSeasons(group).length"
                   class="audit-ok"
                 >季集齐全</span>
                 <span v-if="group.completeness.unreliable" class="audit-badge audit-badge--warn">编号差异</span>
